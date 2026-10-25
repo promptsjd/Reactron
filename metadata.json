@@ -1,0 +1,6 @@
+{
+  "name": "Reactron - Extension Feasibility Spike",
+  "description": "Chrome extension spike validating watch region visual change detection and non-blocking game tab reaction overlays.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

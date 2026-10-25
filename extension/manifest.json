@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Reactron - Custom Game Reactions",
+  "version": "0.5.0",
+  "description": "Configurable text and GIF/image reaction overlays for browser-based games.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "sidePanel",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_title": "Reactron"
+  },
+  "side_panel": {
+    "default_path": "popup/popup.html"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/content-script.js"],
+      "css": ["content/content-style.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "test-game.html",
+        "icons/*",
+        "shared/*",
+        "services/*",
+        "ui/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

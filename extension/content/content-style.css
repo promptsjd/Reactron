@@ -1,0 +1,14 @@
+/**
+ * Reactron Content Script Host Styles
+ * Host is placed as fixed, top-0, left-0, full-screen with pointer-events: none.
+ * This ensures the host element itself never traps mouse, touch, or keyboard events.
+ */
+
+#reactron-host {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 2147483640;
+  pointer-events: none;
+}
