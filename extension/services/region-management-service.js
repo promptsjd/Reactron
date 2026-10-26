@@ -13,85 +13,89 @@
  */
 
 import { GameIdentityService } from './game-identity-service.js';
+import { REACTION_CONFIG_CONSTANTS } from '../shared/types.js';
 
 export class RegionManagementService {
   /**
    * Generates a formatted display label for a Reaction Configuration
+   * Uses centralized naming rule ("Reaction 1", "Reaction 2") without requiring user-entered names.
    * @param {import('../shared/types.js').ReactionConfig} config
    * @param {number} index - 0-based index in the region's configuration list
    * @returns {string} Formatted label
    */
   static formatConfigurationLabel(config, index = 0) {
-    if (!config) return `Reaction ${index + 1}`;
-
-    const gifName = (config.gifReaction?.enabled && config.gifReaction?.name?.trim()) || '';
-    const textName = (config.textReaction?.enabled && config.textReaction?.name?.trim()) || '';
-
-    // If both reaction names provided: join with vertical separator
-    if (gifName && textName) {
-      return `${gifName} | ${textName}`;
-    }
-
-    // If one is provided: use that name
-    if (gifName) return gifName;
-    if (textName) return textName;
-
-    // Custom user title if present
-    if (config.customTitle?.trim()) {
-      return config.customTitle.trim();
-    }
-
-    // If neither is provided: generate display label
-    return `Reaction ${index + 1}`;
+    return `${REACTION_CONFIG_CONSTANTS.LABEL_PREFIX} ${index + 1}`;
   }
 
   /**
-   * Creates a new blank Watch Region
-   * @param {number} regionNumber
+   * Checks whether a region can accept another reaction configuration
+   * @param {import('../shared/types.js').WatchRegion} region
+   * @returns {boolean}
+   */
+  static canAddReaction(region) {
+    const count = Array.isArray(region?.reactionConfigs) ? region.reactionConfigs.length : 0;
+    return count < REACTION_CONFIG_CONSTANTS.MAX_REACTIONS_PER_REGION;
+  }
+
+  /**
+   * Creates a new blank Watch Region with parent gameId link
+   * @param {string} [gameId]
    * @returns {import('../shared/types.js').WatchRegion}
    */
-  static createWatchRegion() {
+  static createWatchRegion(gameId = null) {
     const regionId = GameIdentityService.generateRegionId();
     return {
       id: regionId,
+      ...(gameId ? { gameId } : {}),
       name: '',
       strictness: 75,
       geometry: null,
       previewUrl: null,
-      reactionConfigs: [this.createReactionConfiguration(1)]
+      reactionConfigs: []
     };
   }
 
   /**
-   * Creates a new Reaction Configuration
-   * @param {number} configNumber
+   * Creates a new single-type Reaction Configuration with parent regionId link and filler defaults
+   * @param {number} [configNumber=1]
+   * @param {string} [regionId=null]
+   * @param {'gif'|'text'|null} [initialType=null]
    * @returns {import('../shared/types.js').ReactionConfig}
    */
-  static createReactionConfiguration(configNumber = 1) {
+  static createReactionConfiguration(configNumber = 1, regionId = null, initialType = null) {
     const reactionId = GameIdentityService.generateReactionId();
+    const label = `${REACTION_CONFIG_CONSTANTS.LABEL_PREFIX} ${configNumber}`;
+    const gifFiller = REACTION_CONFIG_CONSTANTS.FILLER_DEFAULTS.GIF;
+    const textFiller = REACTION_CONFIG_CONSTANTS.FILLER_DEFAULTS.TEXT;
+
     return {
       id: reactionId,
+      ...(regionId ? { regionId } : {}),
+      type: initialType,
       customTitle: '',
       gifReaction: {
-        enabled: true,
-        name: 'Victory Explode',
-        fileUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><circle cx="100" cy="100" r="80" fill="%23607DFA" fill-opacity="0.8"/><text x="100" y="108" text-anchor="middle" fill="white" font-size="20" font-family="sans-serif">💥 EXPLOSION</text></svg>',
-        size: 180,
-        delaySeconds: 0.5,
-        durationSeconds: 3,
-        saveToLibrary: false
+        enabled: initialType === REACTION_CONFIG_CONSTANTS.TYPES.GIF,
+        name: label,
+        fileUrl: gifFiller.fileUrl,
+        fileName: gifFiller.fileName,
+        size: gifFiller.size,
+        delaySeconds: gifFiller.delaySeconds,
+        durationSeconds: gifFiller.durationSeconds,
+        saveToLibrary: false,
+        position: { ...gifFiller.position }
       },
       textReaction: {
-        enabled: true,
-        name: 'Victory Text',
-        text: '💥 BOSS CRUSHED!',
-        fontSize: 32,
-        fontColor: '#F4F6FA',
-        fontType: 'impact',
-        animationStyle: 'pop-in',
-        delaySeconds: 0.0,
-        durationSeconds: 3,
-        saveToLibrary: false
+        enabled: initialType === REACTION_CONFIG_CONSTANTS.TYPES.TEXT,
+        name: label,
+        text: textFiller.text,
+        fontSize: textFiller.fontSize,
+        fontColor: textFiller.fontColor,
+        fontType: textFiller.fontType,
+        animationStyle: textFiller.animationStyle,
+        delaySeconds: textFiller.delaySeconds,
+        durationSeconds: textFiller.durationSeconds,
+        saveToLibrary: false,
+        position: { ...textFiller.position }
       }
     };
   }

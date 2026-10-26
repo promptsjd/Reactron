@@ -1,25 +1,47 @@
 /**
- * Reactron Screen D: Reaction Library Placeholder
+ * Reactron Screen D: Reaction Library
  * 
  * Requirements:
  * - Visually consistent Library page with approved design system tokens.
  * - GIF/Image and Text tabs.
- * - Search field.
- * - Empty states for both categories.
- * - Visual placeholder only.
+ * - No search bar.
+ * - Recent reactions shown on top.
+ * - Only show reactions that user can see and use.
  */
 
 import {
   createButton,
-  createEmptyState
+  createEmptyState,
+  createPresetThumbnail
 } from './components.js';
+import { mediaStorage } from '../services/media-storage.js';
+
+function isUsableLibraryItem(item, type) {
+  if (!item || typeof item !== 'object') return false;
+  if (type === 'gif') {
+    const hasMedia = Boolean(
+      item.mediaAssetId ||
+      item.content?.mediaAssetId ||
+      item.content?.fileUrl ||
+      item.summary
+    );
+    return item.type === 'gif' && hasMedia;
+  }
+  if (type === 'text') {
+    const hasText = Boolean(
+      (item.content?.text && item.content.text.trim().length > 0) ||
+      item.summary
+    );
+    return item.type === 'text' && hasText;
+  }
+  return false;
+}
 
 export function renderLibrary({
   libraryGifs = [],
   libraryTexts = [],
   onBackToDashboard,
-  onDeletePreset,
-  onUsePreset
+  onDeletePreset
 }) {
   const container = document.createElement('div');
   container.className = 'r-screen r-screen-library';
@@ -43,35 +65,26 @@ export function renderLibrary({
   navHeader.appendChild(headerTitle);
   container.appendChild(navHeader);
 
-  // Search Field
-  const searchContainer = document.createElement('div');
-  searchContainer.className = 'r-search-container';
-  searchContainer.innerHTML = `
-    <div class="r-search-input-wrapper">
-      <span class="r-search-icon">🔍</span>
-      <input type="text" id="lib-search" class="r-search-input" placeholder="Search saved reactions..." />
-    </div>
-  `;
-  container.appendChild(searchContainer);
-
-  const searchInput = searchContainer.querySelector('#lib-search');
-
   // Tabs for GIF/Image and Text
   const tabsContainer = document.createElement('div');
   tabsContainer.className = 'r-library-tabs';
 
   let currentTab = 'gif'; // 'gif' | 'text'
-  let searchQuery = '';
-  let currentGifs = Array.isArray(libraryGifs) ? [...libraryGifs] : [];
-  let currentTexts = Array.isArray(libraryTexts) ? [...libraryTexts] : [];
+  let currentGifs = (Array.isArray(libraryGifs) ? [...libraryGifs] : [])
+    .filter((item) => isUsableLibraryItem(item, 'gif'))
+    .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+
+  let currentTexts = (Array.isArray(libraryTexts) ? [...libraryTexts] : [])
+    .filter((item) => isUsableLibraryItem(item, 'text'))
+    .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
 
   const gifTab = document.createElement('button');
   gifTab.className = 'r-lib-tab active';
-  gifTab.innerHTML = '<span>🖼️</span> GIF / Image Reactions';
+  gifTab.textContent = 'GIF / Image Reactions';
 
   const textTab = document.createElement('button');
   textTab.className = 'r-lib-tab';
-  textTab.innerHTML = '<span>🔤</span> Text Reactions';
+  textTab.textContent = 'Text Reactions';
 
   tabsContainer.appendChild(gifTab);
   tabsContainer.appendChild(textTab);
@@ -82,90 +95,46 @@ export function renderLibrary({
   listContainer.className = 'r-library-list';
   container.appendChild(listContainer);
 
+  const resolveMedia = (assetId) => mediaStorage.getMedia(assetId);
+
   function renderLibraryItems() {
     listContainer.innerHTML = '';
 
     const items = currentTab === 'gif' ? currentGifs : currentTexts;
-    const filtered = items.filter((item) =>
-      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.summary && item.summary.toLowerCase().includes(searchQuery.toLowerCase()))
-    );
 
-    if (filtered.length === 0) {
+    if (items.length === 0) {
       const emptyState = createEmptyState({
-        icon: currentTab === 'gif' ? '🖼️' : '🔤',
-        title: searchQuery ? 'No Matching Reactions' : (currentTab === 'gif' ? 'No Saved GIF Reactions' : 'No Saved Text Reactions'),
-        description: searchQuery
-          ? `No reactions match "${searchQuery}". Try a different search query.`
-          : 'Save reactions to your Library from the Reaction Editor to reuse them across multiple games.'
+        title: currentTab === 'gif' ? 'No Saved GIF Reactions' : 'No Saved Text Reactions',
+        description: 'Save reactions to your Library from the Reaction Editor to reuse them across multiple games.'
       });
       listContainer.appendChild(emptyState);
       return;
     }
 
-    filtered.forEach((item) => {
-      const card = document.createElement('div');
-      card.className = 'r-lib-item';
+    const thumbGrid = document.createElement('div');
+    thumbGrid.className = 'r-library-thumb-grid';
 
-      const iconBox = document.createElement('div');
-      iconBox.className = 'r-lib-icon-box';
-      iconBox.textContent = currentTab === 'gif' ? '🖼️' : '🔤';
-
-      const infoBox = document.createElement('div');
-      infoBox.className = 'r-lib-info';
-
-      const nameEl = document.createElement('span');
-      nameEl.className = 'r-lib-name';
-      nameEl.textContent = item.name;
-
-      const summaryEl = document.createElement('span');
-      summaryEl.className = 'r-lib-summary';
-      summaryEl.textContent = item.summary || 'Custom configured reaction';
-
-      infoBox.appendChild(nameEl);
-      infoBox.appendChild(summaryEl);
-
-      const actionsGroup = document.createElement('div');
-      actionsGroup.style.display = 'flex';
-      actionsGroup.style.alignItems = 'center';
-      actionsGroup.style.gap = '6px';
-
-      if (onUsePreset) {
-        const useBtn = createButton({
-          text: 'Use',
-          variant: 'secondary',
-          className: 'r-btn-sm',
-          onClick: () => {
-            onUsePreset(item);
+    items.forEach((item) => {
+      const thumbCard = createPresetThumbnail(item, {
+        compact: false,
+        resolveMedia,
+        onDelete: async () => {
+          if (currentTab === 'gif') {
+            currentGifs = currentGifs.filter((p) => p.id !== item.id);
+          } else {
+            currentTexts = currentTexts.filter((p) => p.id !== item.id);
           }
-        });
-        actionsGroup.appendChild(useBtn);
-      }
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'r-btn-icon-remove';
-      deleteBtn.title = `Delete ${item.name}`;
-      deleteBtn.innerHTML = '✕';
-      deleteBtn.onclick = async (e) => {
-        e.stopPropagation();
-        if (currentTab === 'gif') {
-          currentGifs = currentGifs.filter((p) => p.id !== item.id);
-        } else {
-          currentTexts = currentTexts.filter((p) => p.id !== item.id);
+          renderLibraryItems();
+          if (onDeletePreset) {
+            await onDeletePreset(item.id);
+          }
         }
-        renderLibraryItems();
-        if (onDeletePreset) {
-          await onDeletePreset(item.id);
-        }
-      };
+      });
 
-      actionsGroup.appendChild(deleteBtn);
-
-      card.appendChild(iconBox);
-      card.appendChild(infoBox);
-      card.appendChild(actionsGroup);
-      listContainer.appendChild(card);
+      thumbGrid.appendChild(thumbCard);
     });
+
+    listContainer.appendChild(thumbGrid);
   }
 
   gifTab.addEventListener('click', () => {
@@ -182,18 +151,14 @@ export function renderLibrary({
     renderLibraryItems();
   });
 
-  searchInput.addEventListener('input', (e) => {
-    searchQuery = e.target.value;
-    renderLibraryItems();
-  });
-
   renderLibraryItems();
 
   // Footer Note
   const footerNote = document.createElement('div');
   footerNote.className = 'r-library-footer-note';
-  footerNote.textContent = '💡 Saved presets can be applied in any game via "Load from Library" in the Reaction Editor.';
+  footerNote.textContent = 'Saved presets can be applied in any game via "Load from Library" in the Reaction Editor.';
   container.appendChild(footerNote);
 
   return container;
 }
+

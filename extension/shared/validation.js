@@ -78,3 +78,44 @@ export function validateReactionName(name) {
     error: null
   };
 }
+
+/**
+ * Validates that a reaction configuration has required content for its selected type
+ * @param {'gif'|'text'|null} selectedType
+ * @param {import('./types.js').GifImageReaction} [gifData]
+ * @param {import('./types.js').TextReaction} [textData]
+ * @returns {{isValid: boolean, error: string|null}}
+ */
+export function validateReactionContent(selectedType, gifData, textData) {
+  if (!selectedType) {
+    return {
+      isValid: false,
+      error: 'Please select a reaction type (Gif/Image or Text).'
+    };
+  }
+
+  if (selectedType === 'gif') {
+    const hasMedia = Boolean((gifData?.fileUrl || '').trim() || gifData?.mediaAssetId);
+    if (!hasMedia) {
+      return {
+        isValid: false,
+        error: 'Please select a GIF/Image file first.'
+      };
+    }
+  }
+
+  if (selectedType === 'text') {
+    const hasText = Boolean((textData?.text || '').trim());
+    if (!hasText) {
+      return {
+        isValid: false,
+        error: 'Please enter reaction text first.'
+      };
+    }
+  }
+
+  return {
+    isValid: true,
+    error: null
+  };
+}

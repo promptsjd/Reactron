@@ -28,6 +28,33 @@ export const STRICTNESS_BOUNDS = {
   MATCH_MIN_MISMATCH_PERCENT: 5.0
 };
 
+export const STRICTNESS_LEVELS = [
+  {
+    index: 0,
+    value: 25,
+    shortLabel: 'Loose',
+    helperText: 'Best for areas with moving backgrounds, glowing text, or particle effects.'
+  },
+  {
+    index: 1,
+    value: 75,
+    shortLabel: 'Balanced',
+    helperText: 'Best for standard UI popups, score badges, and Game Over screens.'
+  },
+  {
+    index: 2,
+    value: 90,
+    shortLabel: 'Strict',
+    helperText: 'Best for static HUD icons or menus where you want zero false triggers.'
+  },
+  {
+    index: 3,
+    value: 100,
+    shortLabel: 'Exact',
+    helperText: 'Requires an almost identical match to the captured snapshot.'
+  }
+];
+
 export class StrictnessMapper {
   /**
    * Clamps strictness value to valid range [1, 100]
@@ -39,6 +66,36 @@ export class StrictnessMapper {
       return STRICTNESS_BOUNDS.DEFAULT_SLIDER;
     }
     return Math.max(STRICTNESS_BOUNDS.MIN_SLIDER, Math.min(STRICTNESS_BOUNDS.MAX_SLIDER, Math.round(val)));
+  }
+
+  /**
+   * Maps any numeric strictness (1 - 100) to the closest smart strictness level
+   * @param {number} strictness
+   * @returns {{index: number, value: number, shortLabel: string, helperText: string}}
+   */
+  static resolveSmartStep(strictness) {
+    const s = this.clamp(strictness);
+    let closest = STRICTNESS_LEVELS[1]; // Default to Balanced
+    let minDiff = Infinity;
+
+    for (const level of STRICTNESS_LEVELS) {
+      const diff = Math.abs(s - level.value);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = level;
+      }
+    }
+    return closest;
+  }
+
+  /**
+   * Returns the smart strictness level for a discrete slider index (0 - 3)
+   * @param {number} stepIndex
+   * @returns {{index: number, value: number, shortLabel: string, helperText: string}}
+   */
+  static getLevelByIndex(stepIndex) {
+    const idx = Math.max(0, Math.min(STRICTNESS_LEVELS.length - 1, Math.round(Number(stepIndex) || 0)));
+    return STRICTNESS_LEVELS[idx];
   }
 
   /**

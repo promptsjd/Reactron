@@ -15,17 +15,17 @@
  */
 
 :root {
-  --app-bg: #171B24;
-  --panel-bg: #222936;
-  --panel-bg-subtle: #1C222E;
-  --panel-hover: #2B3445;
-  --primary: #607DFA;
-  --primary-hover: #4F6CE0;
-  --text-main: #F4F6FA;
-  --text-secondary: #A9B3C4;
-  --text-muted: #748094;
-  --border: #374152;
-  --border-light: #48546A;
+--app-bg: #18191B;
+--panel-bg: #252629;
+--panel-bg-subtle: #1F2022;
+--panel-hover: #343539;
+--primary: #F05A5A;
+--primary-hover: #D94747;
+--text-main: #F6F4F1;
+--text-secondary: #B8B7B6;
+--text-muted: #858487;
+--border: #3A3B3F;
+--border-light: #4C4D52;
   --success: #55C5A0;
   --warning: #E9B765;
   --danger: #E05D5D;
@@ -1172,4 +1172,397 @@ body {
   border: 1px solid rgba(116, 128, 148, 0.25);
 }
 
+/* Radio Group Controls for Reaction Type Selection */
+.r-radio-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
 
+.r-radio-group.r-radio-group-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.r-radio-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition: var(--transition);
+}
+
+.r-radio-option:hover:not(.disabled) {
+  border-color: var(--border-light);
+  color: var(--text-main);
+  background: var(--panel-hover);
+}
+
+.r-radio-option.selected {
+  border-color: var(--primary);
+  background: rgba(96, 125, 250, 0.12);
+  color: var(--text-main);
+}
+
+.r-radio-option.disabled {
+  cursor: not-allowed;
+}
+
+.r-radio-input {
+  accent-color: var(--primary);
+  width: 14px;
+  height: 14px;
+  cursor: inherit;
+}
+
+.r-reaction-row-draft {
+  border: none;
+  background: transparent;
+}
+
+.r-reaction-row-draft > .r-reaction-row-body {
+  padding: 4px 0 0 0;
+  background: transparent;
+}
+
+.r-mb-sm {
+  margin-bottom: 8px;
+}
+
+.r-mb-md {
+  margin-bottom: 12px;
+}
+
+.r-mt-sm {
+  margin-top: 8px;
+}
+
+.r-btn:disabled,
+.r-btn.r-btn-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Shared Preset Thumbnail Cards (Reaction Library + Load from Library Dropdown) */
+.r-library-thumb-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.r-preset-thumb-card {
+  position: relative;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  transition: var(--transition);
+}
+
+.r-preset-thumb-card:hover {
+  border-color: var(--border-light);
+}
+
+.r-preset-thumb-stage {
+  width: 100%;
+  height: 92px;
+  background: var(--app-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.r-preset-thumb-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 3px;
+}
+
+.r-preset-thumb-text {
+  font-size: 15px;
+  font-weight: 800;
+  text-align: center;
+  line-height: 1.2;
+  word-break: break-word;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.75);
+}
+
+.r-preset-thumb-loading {
+  font-size: 22px;
+  opacity: 0.7;
+}
+
+.r-preset-thumb-delete {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(23, 27, 36, 0.88);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+  transition: var(--transition);
+}
+
+.r-preset-thumb-delete:hover {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #ffffff;
+}
+
+/* Compact Mode for Load from Library Dropdown */
+.r-preset-thumb-compact {
+  cursor: pointer;
+}
+
+.r-preset-thumb-compact:hover {
+  border-color: var(--primary);
+  background: var(--panel-hover);
+}
+
+.r-preset-thumb-compact .r-preset-thumb-stage {
+  height: 54px;
+  padding: 5px;
+}
+
+.r-preset-thumb-compact .r-preset-thumb-text {
+  font-size: 12px;
+  -webkit-line-clamp: 2;
+}
+
+/* Selected Thumbnail Inside Dropdown Trigger */
+.r-preset-thumb-selected-inline {
+  border: none;
+  background: transparent;
+  width: 100%;
+}
+
+.r-preset-thumb-selected-inline .r-preset-thumb-stage {
+  height: 36px;
+  padding: 2px 6px;
+  background: rgba(15, 18, 24, 0.55);
+  border-radius: 3px;
+}
+
+/* Custom Preset Dropdown */
+.r-preset-dropdown-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.r-preset-dropdown-trigger {
+  width: 100%;
+  min-height: 38px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  color: var(--text-main);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.r-preset-dropdown-trigger:hover,
+.r-preset-dropdown-wrapper.open .r-preset-dropdown-trigger {
+  border-color: var(--primary);
+}
+
+.r-preset-dropdown-trigger-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.r-preset-dropdown-placeholder {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.r-preset-dropdown-arrow {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.r-preset-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  padding: 8px;
+  max-height: 195px;
+  overflow-y: auto;
+  z-index: 40;
+}
+
+.r-preset-dropdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.r-preset-dropdown-empty {
+  text-align: center;
+  padding: 12px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* Smart Stepped Slider Labels (Loose / Balanced / Strict / Exact) */
+.r-slider-steps-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+.r-slider-step-label {
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: var(--transition);
+}
+
+.r-slider-step-label:hover {
+  color: var(--text-secondary);
+}
+
+.r-slider-step-label.active {
+  color: var(--primary);
+}
+
+.r-slider-group.r-slider-group-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* Interactive Font Color Picker (Swatch Window Trigger + Hex/RGB Input) */
+.r-color-picker-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  min-height: 35px;
+  transition: var(--transition);
+}
+
+.r-color-picker-control:focus-within {
+  border-color: var(--primary);
+}
+
+.r-color-swatch-wrapper {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.r-color-native-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+
+.r-color-swatch-preview {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  transition: background-color 0.12s ease;
+}
+
+.r-color-text-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  outline: none;
+}
+
+.r-color-text-input::placeholder {
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+
+/* Reposition Focus Lock: Disable and dim everything except Done Repositioning button */
+body.r-reposition-lock .r-nav-header,
+body.r-reposition-lock .r-screen-game-setup .r-body-scroll > .r-card,
+body.r-reposition-lock .r-select-area-group,
+body.r-reposition-lock .r-preview-frame,
+body.r-reposition-lock .r-region-card > .r-slider-group,
+body.r-reposition-lock .r-reaction-row-header,
+body.r-reposition-lock .r-reactions-section > .r-btn,
+body.r-reposition-lock .r-radio-group,
+body.r-reposition-lock .r-atomic-actions,
+body.r-reposition-lock .r-subfields > *:not(.r-reposition-active-btn) {
+  opacity: 0.3 !important;
+  pointer-events: none !important;
+  user-select: none !important;
+  transition: opacity 0.18s ease;
+}
+
+body.r-reposition-lock .r-reposition-active-btn {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 50;
+  box-shadow: 0 0 0 2px rgba(240, 90, 90, 0.35), 0 6px 16px rgba(0, 0, 0, 0.45);
+}

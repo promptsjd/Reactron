@@ -193,16 +193,24 @@ export class PersistenceService {
 
         const processedConfigs = [];
         if (Array.isArray(region.reactionConfigs)) {
-          for (const config of region.reactionConfigs) {
+          const limitedConfigs = region.reactionConfigs.slice(0, 2);
+          for (let configIndex = 0; configIndex < limitedConfigs.length; configIndex++) {
+            const config = limitedConfigs[configIndex];
             config.regionId = region.id;
             const cfgVal = SchemaValidator.validateReactionConfig(config, region.id);
             if (!cfgVal.isValid) {
               return { success: false, error: cfgVal.error };
             }
 
+            const defaultLabel = `Reaction ${configIndex + 1}`;
+            const resolvedType =
+              config.type ||
+              (config.gifReaction?.enabled ? 'gif' : config.textReaction?.enabled ? 'text' : null);
+
             const processedConfig = {
               id: config.id,
               regionId: region.id,
+              type: resolvedType,
               customTitle: config.customTitle || '',
               updatedAt: Date.now()
             };
@@ -231,9 +239,11 @@ export class PersistenceService {
               const persistedFileUrl =
                 mediaAssetId && !isSmallBuiltInSvg ? '' : (g.fileUrl || '');
 
+              const reactionLabel = (g.name || '').trim() || defaultLabel;
+
               processedConfig.gifReaction = {
                 enabled: !!g.enabled,
-                name: (g.name || '').trim(),
+                name: reactionLabel,
                 mediaAssetId,
                 fileUrl: persistedFileUrl,
                 fileName: g.fileName || '',
@@ -245,12 +255,16 @@ export class PersistenceService {
               };
 
               // Save to library preset if user explicitly requested
-              if (g.saveToLibrary && g.name?.trim()) {
+              if (g.saveToLibrary && g.enabled) {
+                const presetId = g._createNewLibraryPreset
+                  ? `lib_preset_${config.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}_gif`
+                  : (g.libraryPresetId || `lib_preset_${config.id}_gif`);
+                processedConfig.gifReaction.libraryPresetId = presetId;
                 await this.saveLibraryPreset({
-                  id: `lib_preset_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                  id: presetId,
                   type: 'gif',
-                  name: g.name.trim(),
-                  summary: `GIF Overlay (${g.size}px)`,
+                  name: reactionLabel.slice(0, 15),
+                  summary: `GIF Overlay (${g.size || 180}px)`,
                   mediaAssetId,
                   content: { ...processedConfig.gifReaction, saveToLibrary: false }
                 });
@@ -260,9 +274,11 @@ export class PersistenceService {
             // Process Text Reaction (never invent if omitted)
             if (config.textReaction) {
               const t = config.textReaction;
+              const reactionLabel = (t.name || '').trim() || defaultLabel;
+
               processedConfig.textReaction = {
                 enabled: !!t.enabled,
-                name: (t.name || '').trim(),
+                name: reactionLabel,
                 text: (t.text || '').trim(),
                 fontSize: t.fontSize || 32,
                 fontColor: t.fontColor || '#F4F6FA',
@@ -275,12 +291,16 @@ export class PersistenceService {
               };
 
               // Save to library preset if user explicitly requested
-              if (t.saveToLibrary && t.name?.trim()) {
+              if (t.saveToLibrary && t.enabled) {
+                const presetId = t._createNewLibraryPreset
+                  ? `lib_preset_${config.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}_text`
+                  : (t.libraryPresetId || `lib_preset_${config.id}_text`);
+                processedConfig.textReaction.libraryPresetId = presetId;
                 await this.saveLibraryPreset({
-                  id: `lib_preset_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                  id: presetId,
                   type: 'text',
-                  name: t.name.trim(),
-                  summary: `"${t.text}" • ${t.fontType}`,
+                  name: reactionLabel.slice(0, 15),
+                  summary: `"${t.text || ''}" • ${t.fontType || 'impact'}`,
                   content: { ...processedConfig.textReaction, saveToLibrary: false }
                 });
               }
@@ -343,13 +363,6 @@ export class PersistenceService {
 
   /**
    * Saves a reaction configuration inside its parent region and game.
-   * Strictly enforces:
-   * - Preserves complete current state.
-   * - If only GIF/Image is enabled, does NOT invent Text Reaction.
-   * - If only Text is enabled, does NOT invent GIF/Image Reaction.
-   * - If both exist, persists both independently.
-   * - Saves to library preset only if Save to Reaction Library is explicitly selected.
-   * - Saving a preset does not create or modify an unrelated game.
    * @param {string} gameId
    * @param {string} regionId
    * @param {import('../shared/types.js').ReactionConfig} config
@@ -373,9 +386,18 @@ export class PersistenceService {
       region.reactionConfigs = [];
     }
 
+    const existingIndex = region.reactionConfigs.findIndex((c) => c.id === config.id);
+    const slotNumber = existingIndex >= 0 ? existingIndex + 1 : region.reactionConfigs.length + 1;
+    const defaultLabel = `Reaction ${slotNumber}`;
+    const resolvedType =
+      config.type ||
+      (config.gifReaction?.enabled ? 'gif' : config.textReaction?.enabled ? 'text' : null);
+
     // 1. Process GIF reaction media persistence
     const savedConfig = {
       id: config.id,
+      regionId: region.id,
+      type: resolvedType,
       customTitle: config.customTitle || '',
       updatedAt: Date.now()
     };
@@ -405,9 +427,11 @@ export class PersistenceService {
       const persistedFileUrl =
         mediaAssetId && !isSmallBuiltInSvg ? '' : (g.fileUrl || '');
 
+      const reactionLabel = (g.name || '').trim() || defaultLabel;
+
       savedConfig.gifReaction = {
         enabled: !!g.enabled,
-        name: (g.name || '').trim(),
+        name: reactionLabel,
         mediaAssetId,
         fileUrl: persistedFileUrl,
         fileName: g.fileName || '',
@@ -418,13 +442,15 @@ export class PersistenceService {
         position: g.position || { xRatio: 0.5, yRatio: 0.35 }
       };
 
-      // Save to library preset if requested and named
-      if (g.saveToLibrary && g.name?.trim()) {
+      // Save to library preset if requested
+      if (g.saveToLibrary && g.enabled) {
+        const presetId = g.libraryPresetId || `lib_preset_${config.id}_gif`;
+        savedConfig.gifReaction.libraryPresetId = presetId;
         await this.saveLibraryPreset({
-          id: `lib_preset_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          id: presetId,
           type: 'gif',
-          name: g.name.trim(),
-          summary: `GIF Overlay (${g.size}px)`,
+          name: reactionLabel.slice(0, 15),
+          summary: `GIF Overlay (${g.size || 180}px)`,
           mediaAssetId,
           content: { ...savedConfig.gifReaction, saveToLibrary: false }
         });
@@ -434,9 +460,11 @@ export class PersistenceService {
     // Handle Text Reaction (preserve only if present/enabled, never invent)
     if (config.textReaction) {
       const t = config.textReaction;
+      const reactionLabel = (t.name || '').trim() || defaultLabel;
+
       savedConfig.textReaction = {
         enabled: !!t.enabled,
-        name: (t.name || '').trim(),
+        name: reactionLabel,
         text: (t.text || '').trim(),
         fontSize: t.fontSize || 32,
         fontColor: t.fontColor || '#F4F6FA',
@@ -448,20 +476,21 @@ export class PersistenceService {
         position: t.position || { xRatio: 0.5, yRatio: 0.6 }
       };
 
-      // Save to library preset if requested and named
-      if (t.saveToLibrary && t.name?.trim()) {
+      // Save to library preset if requested
+      if (t.saveToLibrary && t.enabled) {
+        const presetId = t.libraryPresetId || `lib_preset_${config.id}_text`;
+        savedConfig.textReaction.libraryPresetId = presetId;
         await this.saveLibraryPreset({
-          id: `lib_preset_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          id: presetId,
           type: 'text',
-          name: t.name.trim(),
-          summary: `"${t.text}" • ${t.fontType}`,
+          name: reactionLabel.slice(0, 15),
+          summary: `"${t.text || ''}" • ${t.fontType || 'impact'}`,
           content: { ...savedConfig.textReaction, saveToLibrary: false }
         });
       }
     }
 
     // Update inside parent region
-    const existingIndex = region.reactionConfigs.findIndex((c) => c.id === config.id);
     if (existingIndex >= 0) {
       region.reactionConfigs[existingIndex] = savedConfig;
     } else {
@@ -484,14 +513,15 @@ export class PersistenceService {
   // ==========================================
 
   /**
-   * Retrieves library presets
+   * Retrieves library presets ordered with the most recent reaction on top
    * @param {'gif'|'text'} [type]
    * @returns {Promise<Array<any>>}
    */
   async getLibraryPresets(type) {
     await this.initialize();
     const presets = await this._readKey(STORAGE_KEYS.LIBRARY_PRESETS);
-    const list = Array.isArray(presets) ? presets : [];
+    const list = Array.isArray(presets) ? [...presets] : [];
+    list.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
     if (type) {
       return list.filter((p) => p.type === type);
     }
@@ -499,7 +529,7 @@ export class PersistenceService {
   }
 
   /**
-   * Saves a reusable preset into the library
+   * Saves a reusable preset into the library with its own unique ID and places the most recent on top.
    * Does not create or touch any Game configuration.
    * @param {any} preset
    * @returns {Promise<{success: boolean, error?: string}>}
@@ -512,31 +542,38 @@ export class PersistenceService {
       return { success: false, error: validation.error };
     }
 
-    const presets = await this.getLibraryPresets();
+    const presets = await this._readKey(STORAGE_KEYS.LIBRARY_PRESETS);
+    const list = Array.isArray(presets) ? [...presets] : [];
     const normalizedName = preset.name.trim().toLowerCase();
-    const existingIndex = presets.findIndex(
+    const isDefaultGeneratedLabel = /^reaction \d+$/i.test(normalizedName);
+
+    const existingIndex = list.findIndex(
       (p) =>
         p.id === preset.id ||
-        (p.type === preset.type && (p.name || '').trim().toLowerCase() === normalizedName)
+        (!isDefaultGeneratedLabel &&
+          p.type === preset.type &&
+          (p.name || '').trim().toLowerCase() === normalizedName)
     );
 
-    const existingPreset = existingIndex >= 0 ? presets[existingIndex] : null;
+    const now = Date.now();
+    const existingPreset = existingIndex >= 0 ? list[existingIndex] : null;
     const updatedPreset = {
       ...existingPreset,
       ...preset,
       id: existingPreset ? existingPreset.id : preset.id,
       name: preset.name.trim(),
-      updatedAt: Date.now()
+      createdAt: existingPreset?.createdAt || preset.createdAt || now,
+      updatedAt: now
     };
 
     if (existingIndex >= 0) {
-      presets[existingIndex] = updatedPreset;
-    } else {
-      presets.unshift(updatedPreset);
+      list.splice(existingIndex, 1);
     }
+    // Always place most recently saved/updated preset at the top
+    list.unshift(updatedPreset);
 
     try {
-      await this._writeKey(STORAGE_KEYS.LIBRARY_PRESETS, presets);
+      await this._writeKey(STORAGE_KEYS.LIBRARY_PRESETS, list);
       return { success: true, preset: updatedPreset };
     } catch (err) {
       return { success: false, error: `Failed to save library preset: ${err.message}` };

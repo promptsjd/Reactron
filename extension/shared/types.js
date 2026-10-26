@@ -47,6 +47,8 @@
 /**
  * @typedef {Object} ReactionConfig
  * @property {string} id - Unique reaction configuration ID
+ * @property {string} [regionId] - Parent Watch Region ID
+ * @property {'gif'|'text'|null} [type] - Selected reaction type ('gif' | 'text' | null)
  * @property {string} [customTitle] - Optional user override title
  * @property {GifImageReaction} [gifReaction] - Optional GIF/image reaction settings
  * @property {TextReaction} [textReaction] - Optional text reaction settings
@@ -55,7 +57,8 @@
 /**
  * @typedef {Object} GifImageReaction
  * @property {boolean} enabled - Whether GIF reaction is active
- * @property {string} name - Name (max 15 chars)
+ * @property {string} [name] - Generated or preset label
+ * @property {string} [mediaAssetId] - Referenced media asset ID in IndexedDB
  * @property {string} [fileUrl] - Image/GIF URL or base64 data URL
  * @property {string} [fileName] - Original uploaded filename
  * @property {number} size - Size in pixels (e.g. 80 - 400)
@@ -68,7 +71,7 @@
 /**
  * @typedef {Object} TextReaction
  * @property {boolean} enabled - Whether text reaction is active
- * @property {string} name - Name (max 15 chars)
+ * @property {string} [name] - Generated or preset label
  * @property {string} text - The displayed text string (strictly sanitized)
  * @property {number} fontSize - Font size in px (18 to 56)
  * @property {string} fontColor - Hex color string
@@ -113,3 +116,38 @@ export const MEDIA_LIMITS = {
   ALLOWED_MIME_TYPES: ['image/gif', 'image/png', 'image/jpeg', 'image/webp'],
   ALLOWED_EXTENSIONS: ['.gif', '.png', '.jpg', '.jpeg', '.webp']
 };
+
+export const REACTION_CONFIG_CONSTANTS = {
+  MAX_REACTIONS_PER_REGION: 2,
+  LABEL_PREFIX: 'Reaction',
+  TYPES: {
+    GIF: 'gif',
+    TEXT: 'text'
+  },
+  RADIO_OPTIONS: [
+    { id: 'gif', label: 'Gif/Image' },
+    { id: 'text', label: 'Text' }
+  ],
+  FILLER_DEFAULTS: {
+    GIF: {
+      fileName: '',
+      fileUrl: '',
+      size: 180,
+      delaySeconds: 0,
+      durationSeconds: 3,
+      position: { xRatio: 0.5, yRatio: 0.35 }
+    },
+    TEXT: {
+      text: '',
+      placeholder: 'Enter reaction text...',
+      fontSize: 32,
+      fontColor: '#F4F6FA',
+      fontType: 'impact',
+      animationStyle: 'pop-in',
+      delaySeconds: 0,
+      durationSeconds: 3,
+      position: { xRatio: 0.5, yRatio: 0.6 }
+    }
+  }
+};
+

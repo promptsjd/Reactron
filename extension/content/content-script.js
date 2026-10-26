@@ -66,24 +66,8 @@
 
     .selection-box {
       position: absolute;
-      border: 2px dashed #607DFA;
-      background: rgba(96, 125, 250, 0.2);
-      pointer-events: none;
-    }
-
-    .selection-hint {
-      position: absolute;
-      top: 16px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #171B24;
-      color: #F4F6FA;
-      padding: 10px 18px;
-      border-radius: 8px;
-      border: 1px solid #374152;
-      font-size: 13px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+      border: 2px dashed #F05A5A;
+      background: rgba(240, 90, 90, 0.2);
       pointer-events: none;
     }
 
@@ -160,32 +144,32 @@
     }
 
     @keyframes rAnimPopIn {
-      0% { transform: scale(0.6); opacity: 0; }
-      70% { transform: scale(1.08); opacity: 1; }
-      100% { transform: scale(1); opacity: 1; }
+      0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0; }
+      70% { transform: translate(-50%, -50%) scale(1.08); opacity: 1; }
+      100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
     }
 
     @keyframes rAnimSlideTop {
-      0% { transform: translateY(-40px); opacity: 0; }
-      100% { transform: translateY(0); opacity: 1; }
+      0% { transform: translate(-50%, calc(-50% - 40px)); opacity: 0; }
+      100% { transform: translate(-50%, -50%); opacity: 1; }
     }
 
     @keyframes rAnimShake {
-      0%, 100% { transform: translate(0, 0); }
-      20% { transform: translate(-8px, 6px); }
-      40% { transform: translate(8px, -6px); }
-      60% { transform: translate(-6px, -4px); }
-      80% { transform: translate(6px, 4px); }
+      0%, 100% { transform: translate(-50%, -50%); }
+      20% { transform: translate(calc(-50% - 8px), calc(-50% + 6px)); }
+      40% { transform: translate(calc(-50% + 8px), calc(-50% - 6px)); }
+      60% { transform: translate(calc(-50% - 6px), calc(-50% - 4px)); }
+      80% { transform: translate(calc(-50% + 6px), calc(-50% + 4px)); }
     }
 
     @keyframes rAnimFadeZoom {
-      0% { opacity: 0; transform: scale(0.85); }
-      100% { opacity: 1; transform: scale(1); }
+      0% { opacity: 0; transform: translate(-50%, -50%) scale(0.85); }
+      100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
     }
 
     @keyframes rAnimFlash {
-      0% { opacity: 1; transform: scale(1); }
-      100% { opacity: 0.35; transform: scale(1.04); }
+      0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      100% { opacity: 0.35; transform: translate(-50%, -50%) scale(1.04); }
     }
 
     /* =========================================
@@ -218,27 +202,6 @@
     .reposition-handle.tr { top: -6px; right: -6px; }
     .reposition-handle.bl { bottom: -6px; left: -6px; }
     .reposition-handle.br { bottom: -6px; right: -6px; }
-
-    .reposition-top-banner {
-      position: fixed;
-      top: 16px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #171B24;
-      border: 1px solid #607DFA;
-      color: #F4F6FA;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      font-family: sans-serif;
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
-      pointer-events: none;
-      z-index: 2147483647;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
   `;
   shadowRoot.appendChild(styleEl);
 
@@ -248,7 +211,6 @@
   let selectionBackdrop = null;
   let selectionBox = null;
   let repositionEl = null;
-  let repositionBannerEl = null;
 
   // --- Watch Region Selection Logic ---
   function startRegionSelection() {
@@ -260,9 +222,6 @@
     selectionBackdrop.className = 'selection-overlay';
     selectionBackdrop.tabIndex = 0;
     selectionBackdrop.innerHTML = `
-      <div class="selection-hint">
-        Click and drag to select a Watch Region. Press ESC to cancel.
-      </div>
       <div class="selection-box" style="display: none;"></div>
     `;
     uiContainer.appendChild(selectionBackdrop);
@@ -325,53 +284,63 @@
           viewportHeight: vh
         };
 
-        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-          chrome.runtime.sendMessage({ action: 'CAPTURE_VISIBLE_TAB' }, (res) => {
-            if (res && res.dataUrl) {
-              const img = new Image();
-              img.onload = () => {
-                const dpr = window.devicePixelRatio || 1;
-                const cropX = Math.round(left * dpr);
-                const cropY = Math.round(top * dpr);
-                const cropW = Math.round(width * dpr);
-                const cropH = Math.round(height * dpr);
-                const canvas = document.createElement('canvas');
-                canvas.width = cropW;
-                canvas.height = cropH;
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                  ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-                  const croppedDataUrl = canvas.toDataURL('image/png');
+        const captureRegionId = state.targetRegionId || null;
 
-                  if (chrome.storage && chrome.storage.local) {
-                    chrome.storage.local.set({
-                      reactron_last_captured_region: {
-                        regionId: state.targetRegionId || null,
-                        geometry: normalizedGeom,
-                        previewUrl: croppedDataUrl,
-                        capturedAt: Date.now()
-                      }
-                    });
-                  }
+        // Wait for two animation frames + brief paint settle so the selection overlay tint
+        // and dashed border are completely removed from the compositor before capturing
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+                chrome.runtime.sendMessage({ action: 'CAPTURE_VISIBLE_TAB' }, (res) => {
+                  if (res && res.dataUrl) {
+                    const img = new Image();
+                    img.onload = () => {
+                      const dpr = window.devicePixelRatio || 1;
+                      const cropX = Math.round(left * dpr);
+                      const cropY = Math.round(top * dpr);
+                      const cropW = Math.round(width * dpr);
+                      const cropH = Math.round(height * dpr);
+                      const canvas = document.createElement('canvas');
+                      canvas.width = cropW;
+                      canvas.height = cropH;
+                      const ctx = canvas.getContext('2d');
+                      if (ctx) {
+                        ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+                        const croppedDataUrl = canvas.toDataURL('image/png');
 
-                  if (chrome.runtime && chrome.runtime.sendMessage) {
-                    chrome.runtime.sendMessage({
-                      action: 'REGION_CAPTURED',
-                      regionId: state.targetRegionId || null,
-                      geometry: normalizedGeom,
-                      previewUrl: croppedDataUrl
-                    }, () => {
-                      if (chrome.runtime.lastError) {
-                        // Extension context may have closed or no listener, safe to ignore
+                        if (chrome.storage && chrome.storage.local) {
+                          chrome.storage.local.set({
+                            reactron_last_captured_region: {
+                              regionId: captureRegionId,
+                              geometry: normalizedGeom,
+                              previewUrl: croppedDataUrl,
+                              capturedAt: Date.now()
+                            }
+                          });
+                        }
+
+                        if (chrome.runtime && chrome.runtime.sendMessage) {
+                          chrome.runtime.sendMessage({
+                            action: 'REGION_CAPTURED',
+                            regionId: captureRegionId,
+                            geometry: normalizedGeom,
+                            previewUrl: croppedDataUrl
+                          }, () => {
+                            if (chrome.runtime.lastError) {
+                              // Extension context may have closed or no listener, safe to ignore
+                            }
+                          });
+                        }
                       }
-                    });
+                    };
+                    img.src = res.dataUrl;
                   }
-                }
-              };
-              img.src = res.dataUrl;
-            }
+                });
+              }
+            }, 50);
           });
-        }
+        });
       }
     };
 
@@ -415,10 +384,9 @@
     state.activeOverlayTimers.forEach((t) => clearTimeout(t));
     state.activeOverlayTimers = [];
 
-    const existing = uiContainer.querySelectorAll('.r-overlay-container, .reposition-top-banner');
+    const existing = uiContainer.querySelectorAll('.r-overlay-container');
     existing.forEach((el) => el.remove());
     repositionEl = null;
-    repositionBannerEl = null;
     if (!state.isSelecting && !state.repositionMode) {
       hostDiv.style.pointerEvents = 'none';
     }
@@ -432,7 +400,7 @@
     if (!config) return;
 
     // 1. GIF / Image Reaction
-    if (config.gifReaction?.enabled) {
+    if (config.gifReaction?.enabled && (config.gifReaction.fileUrl || '').trim()) {
       const g = config.gifReaction;
       const delayMs = (g.delaySeconds || 0) * 1000;
       const durationMs = (g.durationSeconds || 3) * 1000;
@@ -449,7 +417,7 @@
 
         const img = document.createElement('img');
         img.className = 'r-overlay-gif-img';
-        img.src = g.fileUrl || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><circle cx="100" cy="100" r="80" fill="%23607DFA" fill-opacity="0.8"/><text x="100" y="108" text-anchor="middle" fill="white" font-size="24" font-family="sans-serif" font-weight="bold">GIF REACTION</text></svg>';
+        img.src = g.fileUrl;
         img.style.width = `${g.size || 180}px`;
         img.style.maxWidth = '90vw';
 
@@ -468,7 +436,7 @@
     }
 
     // 2. Text Reaction
-    if (config.textReaction?.enabled) {
+    if (config.textReaction?.enabled && (config.textReaction.text || '').trim()) {
       const t = config.textReaction;
       const delayMs = (t.delaySeconds || 0) * 1000;
       const durationMs = (t.durationSeconds || 3) * 1000;
@@ -488,7 +456,7 @@
         const textEl = document.createElement('div');
         textEl.className = `r-overlay-text ${fontClass}`;
         // Strict text sanitization: plain textContent only
-        textEl.textContent = t.text || '💥 REACTION!';
+        textEl.textContent = t.text.trim();
         textEl.style.fontSize = `${t.fontSize || 32}px`;
         textEl.style.color = t.fontColor || '#F4F6FA';
 
@@ -521,6 +489,10 @@
 
   function startRepositionMode(itemType, itemData) {
     clearAllOverlays();
+    if (!itemData) return;
+    if (itemType === 'gif' && !(itemData.fileUrl || '').trim()) return;
+    if (itemType === 'text' && !(itemData.text || '').trim()) return;
+
     state.repositionMode = true;
     state.repositionItemType = itemType;
     hostDiv.style.pointerEvents = 'auto';
@@ -533,15 +505,6 @@
 
     state.repositionOriginalPos = { xRatio: initX, yRatio: initY };
     state.repositionCurrentPos = { xRatio: initX, yRatio: initY };
-
-    // Reposition Top Banner
-    repositionBannerEl = document.createElement('div');
-    repositionBannerEl.className = 'reposition-top-banner';
-    repositionBannerEl.innerHTML = `
-      <span>🎯</span>
-      <span>Repositioning ${itemType === 'gif' ? 'GIF / Image' : 'Text'} • Drag to place • Click Done in popup</span>
-    `;
-    uiContainer.appendChild(repositionBannerEl);
 
     // Draggable Target Container
     repositionEl = document.createElement('div');
@@ -559,14 +522,14 @@
     if (itemType === 'gif') {
       const img = document.createElement('img');
       img.className = 'r-overlay-gif-img';
-      img.src = itemData.fileUrl || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><circle cx="100" cy="100" r="80" fill="%23607DFA" fill-opacity="0.8"/><text x="100" y="108" text-anchor="middle" fill="white" font-size="20" font-family="sans-serif">REPOSITION ME</text></svg>';
+      img.src = itemData.fileUrl;
       img.style.width = `${itemData.size || 180}px`;
       repositionEl.appendChild(img);
     } else {
       const textEl = document.createElement('div');
       const fontClass = `font-${itemData.fontType || 'impact'}`;
       textEl.className = `r-overlay-text ${fontClass}`;
-      textEl.textContent = itemData.text || '💥 REPOSITION TEXT';
+      textEl.textContent = itemData.text.trim();
       textEl.style.fontSize = `${itemData.fontSize || 32}px`;
       textEl.style.color = itemData.fontColor || '#F4F6FA';
       repositionEl.appendChild(textEl);
@@ -574,11 +537,19 @@
 
     uiContainer.appendChild(repositionEl);
 
-    // Drag Listener
+    // Drag Listener (preserves pointer grab offset relative to element center)
     let isDragging = false;
+    let grabOffsetX = 0;
+    let grabOffsetY = 0;
 
     const onPointerDown = (e) => {
       isDragging = true;
+      const vw = Math.max(window.innerWidth, 1);
+      const vh = Math.max(window.innerHeight, 1);
+      const currentCenterX = state.repositionCurrentPos.xRatio * vw;
+      const currentCenterY = state.repositionCurrentPos.yRatio * vh;
+      grabOffsetX = e.clientX - currentCenterX;
+      grabOffsetY = e.clientY - currentCenterY;
       e.stopPropagation();
       e.preventDefault();
     };
@@ -588,9 +559,12 @@
       const vw = Math.max(window.innerWidth, 1);
       const vh = Math.max(window.innerHeight, 1);
 
+      const targetCenterX = e.clientX - grabOffsetX;
+      const targetCenterY = e.clientY - grabOffsetY;
+
       // Clamp between 5% and 95% of content viewport
-      const clampedX = Math.max(vw * 0.05, Math.min(e.clientX, vw * 0.95));
-      const clampedY = Math.max(vh * 0.05, Math.min(e.clientY, vh * 0.95));
+      const clampedX = Math.max(vw * 0.05, Math.min(targetCenterX, vw * 0.95));
+      const clampedY = Math.max(vh * 0.05, Math.min(targetCenterY, vh * 0.95));
 
       const xRatio = Number((clampedX / vw).toFixed(4));
       const yRatio = Number((clampedY / vh).toFixed(4));
@@ -683,6 +657,35 @@
   window.addEventListener('message', (event) => {
     if (event.data && event.data.action === 'REACTRON_SIMULATE_REACTION' && event.data.config) {
       renderReactionPreview(event.data.config);
+    }
+  });
+
+  // --- MV3 Service Worker Keep-Alive Heartbeat ---
+  // Keeps background service worker awake while the game tab is visible even when the side panel is closed
+  const HEARTBEAT_INTERVAL_MS = 20000;
+
+  function sendKeepAliveHeartbeat() {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+      return;
+    }
+    if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+      try {
+        chrome.runtime.sendMessage({ action: 'KEEP_ALIVE_HEARTBEAT' }, () => {
+          if (chrome.runtime.lastError) {
+            // Ignore transient runtime errors if extension is reloading
+          }
+        });
+      } catch {
+        // Ignore if extension context was invalidated
+      }
+    }
+  }
+
+  sendKeepAliveHeartbeat();
+  setInterval(sendKeepAliveHeartbeat, HEARTBEAT_INTERVAL_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      sendKeepAliveHeartbeat();
     }
   });
 

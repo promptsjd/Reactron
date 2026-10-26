@@ -18,9 +18,19 @@ export class OverlayEngineService {
   static async previewReaction(tabId, config) {
     if (!config) return { success: false, error: 'No configuration provided' };
 
+    const immediatePreviewConfig = {
+      ...config,
+      gifReaction: config.gifReaction
+        ? { ...config.gifReaction, delaySeconds: 0 }
+        : undefined,
+      textReaction: config.textReaction
+        ? { ...config.textReaction, delaySeconds: 0 }
+        : undefined
+    };
+
     return this._sendMessageToTab(tabId, {
       action: 'RENDER_OVERLAY_PREVIEW',
-      config
+      config: immediatePreviewConfig
     });
   }
 

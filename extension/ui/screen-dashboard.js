@@ -141,8 +141,6 @@ export function renderDashboard({
       const infoCol = document.createElement('div');
       infoCol.className = 'r-game-info';
 
-      const status = (gameStatuses && (gameStatuses.get ? gameStatuses.get(game.id) : gameStatuses[game.id])) || null;
-
       const nameRow = document.createElement('div');
       nameRow.className = 'r-game-name-row';
 
@@ -151,47 +149,7 @@ export function renderDashboard({
       nameEl.textContent = game.name;
       nameRow.appendChild(nameEl);
 
-      const statusBadge = document.createElement('span');
-      const regionsCount = game.watchRegions ? game.watchRegions.length : 0;
-      const configuredReactionsCount = (game.watchRegions || []).reduce((sum, region) => {
-        const configs = Array.isArray(region.reactionConfigs) ? region.reactionConfigs : [];
-        const enabledCount = configs.filter(
-          (c) => c && (c.gifReaction?.enabled || c.textReaction?.enabled)
-        ).length;
-        return sum + enabledCount;
-      }, 0);
-      let metaText = `${regionsCount} Watch Regions • ${configuredReactionsCount} Reactions`;
-
-      if (!game.isEnabled) {
-        statusBadge.className = 'r-badge r-badge-muted';
-        statusBadge.textContent = 'Disabled';
-        metaText += ' • Disabled (not monitored)';
-      } else if (status?.status === 'ACTIVE') {
-        statusBadge.className = 'r-badge r-badge-success';
-        statusBadge.textContent = '🟢 Monitoring';
-        metaText += ` • Triggered ${status.triggerCount || 0}x`;
-      } else if (status?.status === 'UNSUPPORTED_PAGE') {
-        statusBadge.className = 'r-badge r-badge-warning';
-        statusBadge.textContent = '⚠️ Unsupported';
-        metaText += ` • ${status.reason || 'Browser security prevents monitoring internal pages'}`;
-      } else if (status?.status === 'PAUSED_NAVIGATED') {
-        statusBadge.className = 'r-badge r-badge-idle';
-        statusBadge.textContent = '⏸️ Paused';
-        metaText += ` • ${status.reason || 'Tab navigated away from game URL'}`;
-      } else {
-        statusBadge.className = 'r-badge r-badge-idle';
-        statusBadge.textContent = '⚪ Tab Not Open';
-        metaText += ' • Open game tab to monitor';
-      }
-
-      nameRow.appendChild(statusBadge);
-
-      const metaEl = document.createElement('span');
-      metaEl.className = 'r-game-meta';
-      metaEl.textContent = metaText;
-
       infoCol.appendChild(nameRow);
-      infoCol.appendChild(metaEl);
 
       // Clicking anywhere on game info navigates to Game Setup
       infoCol.addEventListener('click', () => {
@@ -286,14 +244,13 @@ function showDeleteConfirmationModal(game, onConfirm) {
   modalBox.style.textAlign = 'center';
 
   modalBox.innerHTML = `
-    <div style="font-size: 24px; margin-bottom: 8px;">🗑️</div>
-    <h3 style="font-size: 15px; font-weight: 700; color: #F4F6FA; margin-bottom: 8px;">Delete Game</h3>
-    <p style="font-size: 12px; color: #A9B3C4; margin-bottom: 16px; line-height: 1.4;">
+    <h3 style="font-size: 15px; font-weight: 700; color: var(--text-main, #F4F6FA); margin-bottom: 8px;">Delete Game</h3>
+    <p style="font-size: 12px; color: var(--text-secondary, #A9B3C4); margin-bottom: 16px; line-height: 1.4;">
       Are you sure you want to delete <strong>${game.name}</strong>? This will remove all watch regions and triggers for this game.
     </p>
     <div style="display: flex; gap: 8px;">
-      <button id="modal-cancel" style="flex: 1; padding: 8px 12px; background: #171B24; border: 1px solid #374152; color: #F4F6FA; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">Cancel</button>
-      <button id="modal-delete" style="flex: 1; padding: 8px 12px; background: #EF4444; border: none; color: white; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">Delete</button>
+      <button id="modal-cancel" style="flex: 1; padding: 8px 12px; background: var(--app-bg, #171B24); border: 1px solid var(--border, #374152); color: var(--text-main, #F4F6FA); border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">Cancel</button>
+      <button id="modal-delete" style="flex: 1; padding: 8px 12px; background: var(--danger, #EF4444); border: none; color: white; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">Delete</button>
     </div>
   `;
 

@@ -20,7 +20,7 @@ export const DEBOUNCER_STATES = {
 
 export const DEBOUNCER_DEFAULTS = {
   COOLDOWN_MS: 3000,
-  HYSTERESIS_FACTOR: 0.85 // Delta must fall below (threshold * hysteresis) to re-arm, preventing boundary jitter
+  HYSTERESIS_FACTOR: 0.90 // Similarity must drop below (threshold * 0.90) to re-arm, ensuring clean re-arming between game rounds
 };
 
 export class TriggerDebouncer {

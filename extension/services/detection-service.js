@@ -36,11 +36,11 @@ export class DetectionService {
   /**
    * @param {Object} [options]
    * @param {import('./detection-adapter.js').IDetectionAdapter} [options.adapter]
-   * @param {number} [options.samplingRateMs=400]
+   * @param {number} [options.samplingRateMs=500]
    */
   constructor(options = {}) {
     this.adapter = options.adapter || new VisualDiffDetectionAdapter();
-    this.samplingRateMs = options.samplingRateMs || 400;
+    this.samplingRateMs = options.samplingRateMs || 500;
 
     // Active monitoring sessions: Map<sessionKey, MonitoringSession>
     // sessionKey = `${gameId}:${tabId}`
@@ -85,6 +85,27 @@ export class DetectionService {
   }
 
   /**
+   * Returns true if games have already been loaded into the in-memory cache
+   * Used by the background service worker to distinguish wake-from-sleep from warm heartbeats.
+   * @returns {boolean}
+   */
+  hasLoadedGames() {
+    return this._gamesCache.size > 0;
+  }
+
+  /**
+   * Computes a signature of the region's detection parameters (strictness + baseline previewUrl)
+   * so the debouncer can be reset immediately when the user adjusts strictness or reselects the area.
+   * @param {Object} region
+   * @returns {string}
+   * @private
+   */
+  _getRegionSignature(region) {
+    if (!region) return '';
+    return `${region.strictness ?? ''}|${region.previewUrl ?? ''}`;
+  }
+
+  /**
    * Synchronizes monitoring sessions with current saved games list
    * Called whenever games are loaded, added, updated, or toggled.
    * 
@@ -119,8 +140,15 @@ export class DetectionService {
           if (Array.isArray(updatedGame.watchRegions)) {
             for (const r of updatedGame.watchRegions) {
               validRegionIds.add(r.id);
-              if (!session.regionDebouncers.has(r.id)) {
-                session.regionDebouncers.set(r.id, new TriggerDebouncer());
+              const nextSig = this._getRegionSignature(r);
+              const existingDebouncer = session.regionDebouncers.get(r.id);
+              if (!existingDebouncer) {
+                const debouncer = new TriggerDebouncer();
+                debouncer._configSignature = nextSig;
+                session.regionDebouncers.set(r.id, debouncer);
+              } else if (existingDebouncer._configSignature !== nextSig) {
+                existingDebouncer.reset();
+                existingDebouncer._configSignature = nextSig;
               }
             }
             await this._preloadBaselines(updatedGame.watchRegions);
@@ -222,7 +250,9 @@ export class DetectionService {
     const regionDebouncers = new Map();
     if (Array.isArray(game.watchRegions)) {
       game.watchRegions.forEach((r) => {
-        regionDebouncers.set(r.id, new TriggerDebouncer());
+        const debouncer = new TriggerDebouncer();
+        debouncer._configSignature = this._getRegionSignature(r);
+        regionDebouncers.set(r.id, debouncer);
       });
     }
 
@@ -240,6 +270,7 @@ export class DetectionService {
       sampleCount: 0,
       triggerCount: 0,
       lastMeasuredDelta: 0,
+      isSampling: false,
       regionDebouncers,
       intervalId: null
     };
@@ -289,128 +320,147 @@ export class DetectionService {
    * @private
    */
   async _sampleTabSession(session) {
-    if (session.status !== MONITORING_STATUS.ACTIVE) return;
+    if (session.status !== MONITORING_STATUS.ACTIVE || session.isSampling) return;
 
     const game = this._gamesCache.get(session.gameId);
     if (!game || !game.isEnabled || !Array.isArray(game.watchRegions) || game.watchRegions.length === 0) {
       return;
     }
 
-    // 1. Verify tab is still alive and check window
-    let tabInfo;
+    session.isSampling = true;
     try {
-      tabInfo = await this._getTab(session.tabId);
-    } catch {
-      // Tab has closed
-      await this.stopSession(session.key, 'Monitored tab closed');
-      return;
-    }
-
-    if (!tabInfo) {
-      await this.stopSession(session.key, 'Monitored tab no longer available');
-      return;
-    }
-
-    // 2. Verify URL still matches
-    const currentUrl = tabInfo.url || tabInfo.pendingUrl || '';
-    if (!GameIdentityService.matchesUrl(game.url, currentUrl)) {
-      session.status = MONITORING_STATUS.PAUSED_NAVIGATED;
-      session.statusReason = `Tab navigated away to: ${currentUrl.slice(0, 40)}...`;
-      this._notifyStatusChange();
-      return;
-    }
-
-    // 3. Pause capture when tab is not the active foreground tab in its window
-    if (!tabInfo.active) {
-      return;
-    }
-
-    // Capture viewport pixels via extension background capture
-    const captureResult = await this._captureTabViewport(tabInfo.windowId);
-    if (!captureResult.success || !captureResult.dataUrl) {
-      // Tab may be minimized or hidden; do not treat as fatal error, log and retry next tick
-      return;
-    }
-
-    session.sampleCount++;
-    session.lastSampleTimestamp = Date.now();
-
-    // 4. Iterate over configured watch regions with geometry & baseline preview
-    for (const region of game.watchRegions) {
-      if (!region.geometry || !region.previewUrl) continue;
-
-      let baseline = this._baselineCache.get(region.id);
-      if (!baseline) {
-        baseline = await this._decodeDataUrlToPixels(region.previewUrl);
-        if (baseline) this._baselineCache.set(region.id, baseline);
+      // 1. Verify tab is still alive and check window
+      let tabInfo;
+      try {
+        tabInfo = await this._getTab(session.tabId);
+      } catch {
+        // Tab has closed
+        await this.stopSession(session.key, 'Monitored tab closed');
+        return;
       }
 
-      if (!baseline) continue;
-
-      // Crop current captured frame to region's normalized coordinates
-      const currentCrop = await this._cropImageToPixels(captureResult.dataUrl, region.geometry);
-      if (!currentCrop) continue;
-
-      // Map strictness slider (1 - 100%) to detection threshold
-      const threshold = StrictnessMapper.mapToChangeDeltaThreshold(region.strictness);
-
-      // Execute detection comparison via pluggable adapter
-      const compResult = this.adapter.compare(currentCrop, baseline, { threshold });
-      session.lastMeasuredDelta = compResult.delta;
-
-      // Evaluate trigger condition with debouncer & cooldown manager
-      let debouncer = session.regionDebouncers.get(region.id);
-      if (!debouncer) {
-        debouncer = new TriggerDebouncer();
-        session.regionDebouncers.set(region.id, debouncer);
+      if (!tabInfo) {
+        await this.stopSession(session.key, 'Monitored tab no longer available');
+        return;
       }
 
-      const evalResult = debouncer.evaluate(compResult.delta, threshold, Date.now());
-
-      if (evalResult.shouldTrigger) {
-        console.log(`[DetectionService] 🎯 Trigger fired for region "${region.name || region.id}"! Delta: ${compResult.delta}% >= Threshold: ${threshold}%`);
-        session.triggerCount++;
-        session.lastTriggerTimestamp = Date.now();
+      // 2. Verify URL still matches
+      const currentUrl = tabInfo.url || tabInfo.pendingUrl || '';
+      if (!GameIdentityService.matchesUrl(game.url, currentUrl)) {
+        session.status = MONITORING_STATUS.PAUSED_NAVIGATED;
+        session.statusReason = `Tab navigated away to: ${currentUrl.slice(0, 40)}...`;
         this._notifyStatusChange();
+        return;
+      }
 
-        // Dispatch reaction configuration to OverlayEngine
-        if (Array.isArray(region.reactionConfigs)) {
-          for (const config of region.reactionConfigs) {
-            // Only trigger active reactions (has GIF or Text enabled)
-            if (config.gifReaction?.enabled || config.textReaction?.enabled) {
-              if (
-                config.gifReaction?.enabled &&
-                !config.gifReaction.fileUrl &&
-                config.gifReaction.mediaAssetId
-              ) {
-                try {
-                  const media = await mediaStorage.getMedia(config.gifReaction.mediaAssetId);
-                  if (media && media.dataUrl) {
-                    config.gifReaction.fileUrl = media.dataUrl;
+      // 3. Pause capture when tab is not the active foreground tab in its window
+      if (!tabInfo.active) {
+        return;
+      }
+
+      // Capture viewport pixels via extension background capture
+      const captureResult = await this._captureTabViewport(tabInfo.windowId);
+      if (!captureResult.success || !captureResult.dataUrl) {
+        // Tab may be minimized or hidden; do not treat as fatal error, log and retry next tick
+        return;
+      }
+
+      session.sampleCount++;
+      session.lastSampleTimestamp = Date.now();
+
+      // 4. Iterate over configured watch regions with geometry & baseline preview
+      for (const region of game.watchRegions) {
+        if (!region.geometry || !region.previewUrl) continue;
+
+        let baseline = this._baselineCache.get(region.id);
+        if (!baseline) {
+          baseline = await this._decodeDataUrlToPixels(region.previewUrl);
+          if (baseline) this._baselineCache.set(region.id, baseline);
+        }
+
+        if (!baseline) continue;
+
+        // Crop current captured frame to region's normalized coordinates
+        const currentCrop = await this._cropImageToPixels(captureResult.dataUrl, region.geometry);
+        if (!currentCrop) continue;
+
+        // Map strictness slider (1 - 100%) to detection threshold
+        const threshold = StrictnessMapper.mapToChangeDeltaThreshold(region.strictness);
+
+        // Execute detection comparison via pluggable adapter
+        const compResult = this.adapter.compare(currentCrop, baseline, { threshold });
+        session.lastMeasuredDelta = compResult.delta;
+
+        // Evaluate trigger condition with debouncer & cooldown manager
+        let debouncer = session.regionDebouncers.get(region.id);
+        if (!debouncer) {
+          debouncer = new TriggerDebouncer();
+          session.regionDebouncers.set(region.id, debouncer);
+        }
+
+        const evalResult = debouncer.evaluate(compResult.delta, threshold, Date.now());
+
+        if (evalResult.shouldTrigger) {
+          console.log(`[DetectionService] 🎯 Trigger fired for region "${region.name || region.id}"! Delta: ${compResult.delta}% >= Threshold: ${threshold}%`);
+          session.triggerCount++;
+          session.lastTriggerTimestamp = Date.now();
+          this._notifyStatusChange();
+
+          // Dispatch reaction configuration to OverlayEngine
+          if (Array.isArray(region.reactionConfigs)) {
+            for (const config of region.reactionConfigs) {
+              // Only trigger active reactions (has GIF or Text enabled)
+              if (config.gifReaction?.enabled || config.textReaction?.enabled) {
+                if (
+                  config.gifReaction?.enabled &&
+                  !config.gifReaction.fileUrl &&
+                  config.gifReaction.mediaAssetId
+                ) {
+                  try {
+                    const media = await mediaStorage.getMedia(config.gifReaction.mediaAssetId);
+                    if (media && media.dataUrl) {
+                      config.gifReaction.fileUrl = media.dataUrl;
+                    }
+                  } catch (err) {
+                    console.warn('[DetectionService] Failed to hydrate GIF media from IndexedDB:', err);
                   }
-                } catch (err) {
-                  console.warn('[DetectionService] Failed to hydrate GIF media from IndexedDB:', err);
                 }
-              }
 
-              await OverlayEngineService.triggerReaction(session.tabId, config, {
-                regionId: region.id,
-                regionName: region.name,
-                delta: compResult.delta,
-                threshold
-              });
+                await OverlayEngineService.triggerReaction(session.tabId, config, {
+                  regionId: region.id,
+                  regionName: region.name,
+                  delta: compResult.delta,
+                  threshold
+                });
+              }
             }
           }
         }
       }
+    } finally {
+      session.isSampling = false;
     }
   }
 
   /**
    * Helper: capture tab visible viewport
+   * Supports direct capture inside background service worker or message delegation from UI contexts
    * @private
    */
   async _captureTabViewport(windowId) {
+    if (typeof chrome !== 'undefined' && chrome.tabs && typeof chrome.tabs.captureVisibleTab === 'function') {
+      const targetWindowId = windowId !== undefined && windowId !== null ? windowId : null;
+      return new Promise((resolve) => {
+        chrome.tabs.captureVisibleTab(targetWindowId, { format: 'png' }, (dataUrl) => {
+          if (chrome.runtime && chrome.runtime.lastError) {
+            resolve({ success: false, error: chrome.runtime.lastError.message });
+          } else {
+            resolve({ success: Boolean(dataUrl), dataUrl });
+          }
+        });
+      });
+    }
+
     if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
       return { success: false, error: 'Extension runtime unavailable' };
     }

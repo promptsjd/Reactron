@@ -15,7 +15,7 @@
  * LibraryPreset is independent (may reference MediaAsset)
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const STORAGE_KEYS = {
   SCHEMA_VERSION: 'reactron_schema_version',
@@ -23,6 +23,8 @@ export const STORAGE_KEYS = {
   LIBRARY_PRESETS: 'reactron_library_presets_store',
   META: 'reactron_storage_meta'
 };
+
+const LEGACY_SAMPLE_PRESET_IDS = new Set(['lib_lib-g-1', 'lib_lib-t-1', 'lib-g-1', 'lib-t-1']);
 
 /**
  * Migration Registry
@@ -39,6 +41,19 @@ export const MIGRATIONS = [
         regions: Array.isArray(data.regions) ? data.regions : [],
         configs: Array.isArray(data.configs) ? data.configs : [],
         libraryPresets: Array.isArray(data.libraryPresets) ? data.libraryPresets : []
+      };
+    }
+  },
+  {
+    version: 2,
+    description: 'Remove seeded sample library presets so library contains only user-saved reactions',
+    up: (data) => {
+      const presets = Array.isArray(data.libraryPresets)
+        ? data.libraryPresets.filter((p) => p && !LEGACY_SAMPLE_PRESET_IDS.has(p.id))
+        : [];
+      return {
+        games: Array.isArray(data.games) ? data.games : [],
+        libraryPresets: presets
       };
     }
   }

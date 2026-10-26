@@ -12,7 +12,6 @@
 import { gameManagementService } from '../services/game-management-service.js';
 import { persistenceService } from '../services/persistence-service.js';
 import { detectionService } from '../services/detection-service.js';
-import { mockDataService } from '../shared/mock-data.js';
 import { renderDashboard } from '../ui/screen-dashboard.js';
 import { renderGameSetup } from '../ui/screen-game-setup.js';
 import { renderLibrary } from '../ui/screen-library.js';
@@ -42,20 +41,26 @@ class AppController {
     // Render UI immediately so the side panel is never left blank
     await this.render();
 
-    // Attach detection status listener to update badges dynamically
-    try {
-      detectionService.onStatusChange(() => {
-        if (this.currentScreen === 'dashboard') {
-          this.render();
-        }
-      });
-    } catch (err) {
-      console.warn('[Reactron] Detection status listener warning:', err);
-    }
+    // Synchronize detection sessions in background service worker without blocking initial render
+    await this._syncDetection();
+  }
 
-    // Synchronize detection sessions with tabs in background without blocking initial render
+  async _syncDetection() {
     try {
-      await detectionService.syncWithGames(gameManagementService.getGames());
+      if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+        await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ action: 'SYNC_DETECTION_GAMES' }, () => {
+            if (chrome.runtime.lastError) {
+              // Fallback if service worker is waking up
+              detectionService.syncWithGames(gameManagementService.getGames()).finally(resolve);
+            } else {
+              resolve();
+            }
+          });
+        });
+      } else {
+        await detectionService.syncWithGames(gameManagementService.getGames());
+      }
     } catch (err) {
       console.warn('[Reactron] Detection sync warning:', err);
     }
@@ -80,17 +85,16 @@ class AppController {
       case 'dashboard': {
         const dashboardView = renderDashboard({
           games,
-          gameStatuses: detectionService.getAllStatuses(),
           onNavigateToGameSetup: (gameId) => this.navigateTo('game-setup', gameId),
           onNavigateToLibrary: () => this.navigateTo('library'),
           onToggleGame: async (gameId, isChecked) => {
             await gameManagementService.toggleGameEnabled(gameId, isChecked);
-            await detectionService.syncWithGames(gameManagementService.getGames());
+            await this._syncDetection();
             this.render();
           },
           onDeleteGame: async (gameId) => {
             await gameManagementService.deleteGame(gameId);
-            await detectionService.syncWithGames(gameManagementService.getGames());
+            await this._syncDetection();
             this.render();
           },
           onAddGameFromTab: async (onNotify) => {
@@ -144,8 +148,9 @@ class AppController {
           onSaveGame: async (savedGame) => {
             const saveResult = await gameManagementService.saveGame(savedGame);
             if (saveResult.success) {
+              this.selectedGameId = savedGame.id;
               this.draftGame = null;
-              await detectionService.syncWithGames(gameManagementService.getGames());
+              await this._syncDetection();
             }
             return saveResult;
           },

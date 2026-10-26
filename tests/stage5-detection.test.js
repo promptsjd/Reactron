@@ -171,14 +171,20 @@ describe('Phase 6: PersistenceService, GameManagementService & DetectionService 
     await gameMgmt.initialize();
 
     const draft = gameMgmt.createDraftGame('https://poki.com/en/g/cyber-racer', 'Cyber Racer');
-    const region1 = RegionManagementService.createWatchRegion();
-    const config1 = region1.reactionConfigs[0];
+    const region1 = RegionManagementService.createWatchRegion(draft.id);
+    const config1 = RegionManagementService.createReactionConfiguration(1, region1.id, 'gif');
+
+    // Verify dynamic naming rule ("Reaction 1", "Reaction 2") and no legacy Victory Explode/Text mocks
+    assert.equal(RegionManagementService.formatConfigurationLabel(config1, 0), 'Reaction 1');
+    assert.equal(RegionManagementService.formatConfigurationLabel(config1, 1), 'Reaction 2');
+    assert.notEqual(config1.gifReaction.name, 'Victory Explode');
+    assert.notEqual(config1.textReaction.name, 'Victory Text');
 
     // Simulate a large (>2KB) uploaded GIF data URL
     const largeGifDataUrl = 'data:image/gif;base64,' + 'A'.repeat(6000) + 'TAIL_1';
     config1.gifReaction = {
       enabled: true,
-      name: 'Nitro Boost',
+      name: 'Reaction 1',
       fileUrl: largeGifDataUrl,
       fileName: 'nitro.gif',
       size: 200,
@@ -189,9 +195,10 @@ describe('Phase 6: PersistenceService, GameManagementService & DetectionService 
     };
     config1.textReaction = {
       enabled: false,
-      name: '',
+      name: 'Reaction 1',
       text: ''
     };
+    region1.reactionConfigs = [config1];
     draft.watchRegions = [region1];
 
     // 1. Save new game
@@ -203,6 +210,7 @@ describe('Phase 6: PersistenceService, GameManagementService & DetectionService 
     assert.equal(savedGame1.watchRegions.length, 1);
     assert.equal(savedGame1.watchRegions[0].id, region1.id, 'Region ID preserved on save');
     assert.equal(savedGame1.watchRegions[0].reactionConfigs[0].id, config1.id, 'Config ID preserved on save');
+    assert.equal(savedGame1.watchRegions[0].reactionConfigs[0].regionId, region1.id, 'Parent regionId preserved on save');
 
     // Verify large dataUrl was offloaded to mediaStorage and omitted from chrome.storage.local payload
     const persistedGif = savedGame1.watchRegions[0].reactionConfigs[0].gifReaction;
@@ -211,22 +219,16 @@ describe('Phase 6: PersistenceService, GameManagementService & DetectionService 
     const storedMedia = await mediaStorage.getMedia(persistedGif.mediaAssetId);
     assert.equal(storedMedia?.dataUrl, largeGifDataUrl, 'MediaStorage should hold full dataUrl');
 
-    // 2. Save game a second time with saveToLibrary: true and updated summary/size -> verify preset deduplication
+    // 2. Save game a second time with saveToLibrary: true and updated summary/size -> verify preset updates by unique ID
     savedGame1.watchRegions[0].reactionConfigs[0].gifReaction.size = 260;
     const saveRes2 = await gameMgmt.saveGame(savedGame1);
     assert.equal(saveRes2.success, true);
 
-    const persistence = new PersistenceService();
-    // Read from shared singleton via gameMgmt
-    const gifPresets = (await persistence.getLibraryPresets('gif')).filter(
-      (p) => p.name.toLowerCase() === 'nitro boost'
-    );
-    // Also verify on singleton persistenceService via deleteLibraryPreset
     const { persistenceService } = await import('../extension/services/persistence-service.js');
     const singletonPresets = (await persistenceService.getLibraryPresets('gif')).filter(
-      (p) => p.name.toLowerCase() === 'nitro boost'
+      (p) => p.id === persistedGif.libraryPresetId
     );
-    assert.equal(singletonPresets.length, 1, 'Saving multiple times with saveToLibrary: true must not duplicate presets');
+    assert.equal(singletonPresets.length, 1, 'Saving multiple times with same reaction ID updates its preset in place');
     assert.equal(singletonPresets[0].content.size, 260, 'Existing preset should be updated in place');
 
     // 3. Delete preset and delete region -> verify orphaned media is pruned from mediaStorage

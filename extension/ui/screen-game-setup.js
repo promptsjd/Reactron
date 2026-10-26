@@ -32,6 +32,7 @@ import {
 import { createReactionEditor } from './screen-reaction-editor.js';
 import { VALIDATION_LIMITS, validateGameName } from '../shared/validation.js';
 import { RegionManagementService } from '../services/region-management-service.js';
+import { STRICTNESS_LEVELS, StrictnessMapper } from '../services/strictness-mapper.js';
 
 export function renderGameSetup({
   game,
@@ -79,7 +80,83 @@ export function renderGameSetup({
   `;
   topCard.appendChild(urlBox);
 
-  // Game Name input with 15-char limit, counter, and validation
+  // Track whether this game has already been persisted to storage
+  let isGamePersisted = Array.isArray(existingGames) && existingGames.some((g) => g.id === game.id);
+  let autoSaveTimer = null;
+
+  // Watch Region working copy (ensure 1 Watch Region exists so Select Area, Strictness, and Reaction Radio buttons appear immediately)
+  let watchRegions =
+    Array.isArray(game.watchRegions) && game.watchRegions.length > 0
+      ? JSON.parse(JSON.stringify(game.watchRegions.slice(0, 1)))
+      : [RegionManagementService.createWatchRegion(game.id)];
+
+  const primaryRegion = watchRegions[0];
+  primaryRegion.gameId = game.id;
+  if (!Array.isArray(primaryRegion.reactionConfigs)) {
+    primaryRegion.reactionConfigs = [];
+  }
+
+  // If no reactions exist yet, initialize the first draft slot so the radio buttons appear under the strictness slider
+  if (primaryRegion.reactionConfigs.length === 0) {
+    const firstDraft = RegionManagementService.createReactionConfiguration(1, primaryRegion.id, null);
+    firstDraft._isUnsavedDraft = true;
+    primaryRegion.reactionConfigs.push(firstDraft);
+  }
+
+  let expandedConfigId =
+    primaryRegion.reactionConfigs.find((c) => c._isUnsavedDraft)?.id || null;
+
+  /**
+   * Validates Game Name and persists the current game + region + committed reactions to storage
+   */
+  async function persistGameConfiguration() {
+    const valResult = validateGameName(currentGameName, existingGames, game.id);
+    if (!valResult.isValid) {
+      nameField.setError(valResult.error);
+      bodyScroll.scrollTo?.({ top: 0, behavior: 'smooth' });
+      return { success: false, error: valResult.error };
+    }
+
+    nameField.setError(null);
+
+    const cleanedRegions = watchRegions.map((reg) => ({
+      ...reg,
+      gameId: game.id,
+      reactionConfigs: (reg.reactionConfigs || []).filter(
+        (cfg) => !cfg._isUnsavedDraft && (cfg.type || cfg.gifReaction?.enabled || cfg.textReaction?.enabled)
+      )
+    }));
+
+    if (onSaveGame) {
+      const result = await onSaveGame({
+        ...game,
+        name: currentGameName.trim(),
+        watchRegions: cleanedRegions
+      });
+
+      if (result && !result.success) {
+        const errMsg = result.error || 'Failed to save game configuration.';
+        nameField.setError(errMsg);
+        return { success: false, error: errMsg };
+      }
+
+      isGamePersisted = true;
+      return { success: true, game: result?.game };
+    }
+
+    isGamePersisted = true;
+    return { success: true };
+  }
+
+  function scheduleAutoPersistIfSaved() {
+    if (!isGamePersisted) return;
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => {
+      persistGameConfiguration();
+    }, 300);
+  }
+
+  // Wire live Game Name validation + auto-persist when editing an already saved game
   let currentGameName = game.name || '';
   const nameField = createTextInput({
     label: 'Game Name',
@@ -90,6 +167,9 @@ export function renderGameSetup({
       currentGameName = val;
       const result = validateGameName(val, existingGames, game.id);
       nameField.setError(result.error);
+      if (result.isValid) {
+        scheduleAutoPersistIfSaved();
+      }
     }
   });
 
@@ -104,77 +184,15 @@ export function renderGameSetup({
   const regionsSection = document.createElement('div');
   regionsSection.className = 'r-section';
 
-  const sectionHeader = document.createElement('div');
-  sectionHeader.className = 'r-section-header';
-  sectionHeader.innerHTML = `
-    <h2 class="r-section-title">Watch Regions</h2>
-    <span class="r-section-subtitle">Configured trigger zones</span>
-  `;
-  regionsSection.appendChild(sectionHeader);
-
-  // Watch Region working copy
-  let watchRegions = game.watchRegions ? JSON.parse(JSON.stringify(game.watchRegions)) : [];
-  let expandedConfigId = watchRegions.length > 0 && watchRegions[0].reactionConfigs?.length > 0
-    ? watchRegions[0].reactionConfigs[0].id
-    : null;
-  let activeReactionEditor = null;
-
   const regionsListContainer = document.createElement('div');
   regionsListContainer.className = 'r-regions-list';
 
   function renderRegionsList() {
     regionsListContainer.innerHTML = '';
-    activeReactionEditor = null;
 
-    if (watchRegions.length === 0) {
-      // Empty state when no watch regions exist
-      const emptyState = createEmptyState({
-        title: 'No Watch Regions Added',
-        description: 'Select an area where Reactron should look for on-screen events to trigger your reactions.',
-        action: createButton({
-          text: 'Select Area',
-          variant: 'primary',
-          onClick: () => {
-            const newRegion = RegionManagementService.createWatchRegion(1);
-            watchRegions.push(newRegion);
-            expandedConfigId = newRegion.reactionConfigs[0].id;
-            renderRegionsList();
-            // Start interactive area selection
-            triggerSelectArea(newRegion);
-          }
-        })
-      });
-      regionsListContainer.appendChild(emptyState);
-      return;
-    }
-
-    watchRegions.forEach((region, regionIndex) => {
+    watchRegions.forEach((region) => {
       const regionCard = document.createElement('div');
       regionCard.className = 'r-card r-region-card';
-
-      // Region Title Row with Name & Clear/Remove control
-      const regionTitleRow = document.createElement('div');
-      regionTitleRow.className = 'r-region-header-row';
-
-      const regionLabel = document.createElement('span');
-      regionLabel.className = 'r-region-name';
-      const customRegionName =
-        region.name && !/^Watch Region \d+$/i.test(region.name.trim()) ? region.name.trim() : '';
-      regionLabel.textContent = customRegionName || `Watch Region ${regionIndex + 1}`;
-
-      // Small clear/remove control at top-right of region card
-      const removeBtn = document.createElement('button');
-      removeBtn.className = 'r-btn-icon-remove';
-      removeBtn.title = 'Clear / Remove Watch Region';
-      removeBtn.innerHTML = '✕';
-      removeBtn.onclick = () => {
-        watchRegions = watchRegions.filter((r) => r.id !== region.id);
-        renderRegionsList();
-      };
-
-      regionTitleRow.appendChild(regionLabel);
-      regionTitleRow.appendChild(removeBtn);
-      regionCard.appendChild(regionTitleRow);
 
       // Select Area Button & Helper Text
       const selectAreaRow = document.createElement('div');
@@ -208,11 +226,14 @@ export function renderGameSetup({
         `;
         const clearBtn = previewFrame.querySelector('.r-preview-clear-btn');
         if (clearBtn) {
-          clearBtn.onclick = (e) => {
+          clearBtn.onclick = async (e) => {
             e.stopPropagation();
             region.previewUrl = null;
             region.geometry = null;
             renderRegionsList();
+            if (isGamePersisted) {
+              await persistGameConfiguration();
+            }
           };
         }
       } else {
@@ -225,109 +246,78 @@ export function renderGameSetup({
       }
       regionCard.appendChild(previewFrame);
 
-      // Strictness Slider with visible value and concise helper text
+      const isAreaSelected = Boolean(region.previewUrl && region.geometry);
+
+      // Smart 4-step Strictness Slider (Loose / Balanced / Strict / Exact) - disabled until an area is selected
+      const resolvedStep = StrictnessMapper.resolveSmartStep(region.strictness || 75);
+      region.strictness = resolvedStep.value;
+
       const strictnessSlider = createSlider({
         label: 'Strictness',
-        min: 1,
-        max: 100,
-        value: region.strictness || 75,
-        unit: '%',
-        helperText: 'Higher strictness requires larger visual change to trigger reaction.',
+        value: region.strictness,
+        steps: STRICTNESS_LEVELS,
+        disabled: !isAreaSelected,
+        helperText: resolvedStep.helperText,
         onChange: (val) => {
           region.strictness = val;
+          scheduleAutoPersistIfSaved();
         }
       });
       regionCard.appendChild(strictnessSlider);
 
-      // Reaction Configurations Section (Multiple per region)
+      // Reaction Configurations Section (directly under Strictness slider, up to 2 reactions one by one)
       const reactionConfigsContainer = document.createElement('div');
       reactionConfigsContainer.className = 'r-reactions-section';
 
-      const reactionsHeaderRow = document.createElement('div');
-      reactionsHeaderRow.className = 'r-reactions-header-row';
+      if (!Array.isArray(region.reactionConfigs)) {
+        region.reactionConfigs = [];
+      }
 
-      const reactionsHeader = document.createElement('span');
-      reactionsHeader.className = 'r-reactions-header';
-      reactionsHeader.textContent = 'Reaction Configurations';
+      // Ensure at least 1 draft slot exists if all reactions were removed
+      if (region.reactionConfigs.length === 0) {
+        const draftSlot = RegionManagementService.createReactionConfiguration(1, region.id, null);
+        draftSlot._isUnsavedDraft = true;
+        region.reactionConfigs.push(draftSlot);
+        expandedConfigId = draftSlot.id;
+      }
 
-      const addReactionBtn = createButton({
-        text: 'Add Reaction',
-        variant: 'ghost',
-        icon: '➕',
-        className: 'r-btn-xs',
-        onClick: () => {
-          const newConfig = RegionManagementService.createReactionConfiguration(
-            (region.reactionConfigs?.length || 0) + 1
-          );
-          newConfig._isUnsavedDraft = true;
-          if (!region.reactionConfigs) region.reactionConfigs = [];
-          region.reactionConfigs.push(newConfig);
-          expandedConfigId = newConfig.id;
-          renderRegionsList();
-        }
-      });
+      const reactionConfigs = region.reactionConfigs;
 
-      reactionsHeaderRow.appendChild(reactionsHeader);
-      reactionsHeaderRow.appendChild(addReactionBtn);
-      reactionConfigsContainer.appendChild(reactionsHeaderRow);
-
-      const reactionConfigs = region.reactionConfigs || [];
       reactionConfigs.forEach((reactionConfig, configIndex) => {
-        const row = document.createElement('div');
-        row.className = 'r-reaction-row';
-
+        reactionConfig.regionId = region.id;
         const isExpanded = expandedConfigId === reactionConfig.id;
-
-        // Label formatting policy:
-        // - Both names: "Name1 | Name2"
-        // - One name: "Name"
-        // - Neither: Generated display label ("Reaction 1")
-        // - Keeps generated labels separate from user-entered names
+        const isUnsavedDraft = Boolean(reactionConfig._isUnsavedDraft);
         const displayLabel = RegionManagementService.formatConfigurationLabel(
           reactionConfig,
           configIndex
         );
 
-        // Row Header (Locked Summary State with Edit & Delete Actions)
-        const rowHeader = document.createElement('div');
-        rowHeader.className = `r-reaction-row-header ${isExpanded ? 'expanded' : ''}`;
-        
-        const infoDiv = document.createElement('div');
-        infoDiv.className = 'r-reaction-row-info';
-        infoDiv.innerHTML = `
-          <span class="r-chevron">${isExpanded ? '▼' : '▶'}</span>
-          <span class="r-reaction-row-title">${displayLabel}</span>
-        `;
+        const row = document.createElement('div');
+        row.className = `r-reaction-row ${isUnsavedDraft && isExpanded ? 'r-reaction-row-draft' : ''}`.trim();
 
-        const actionsDiv = document.createElement('div');
-        actionsDiv.className = 'r-reaction-row-actions';
-        actionsDiv.style.display = 'flex';
-        actionsDiv.style.alignItems = 'center';
-        actionsDiv.style.gap = '6px';
+        // Collapsed Summary Header (shown when reaction is saved/collapsed, or as header when editing a saved reaction)
+        if (!isUnsavedDraft || !isExpanded) {
+          const rowHeader = document.createElement('div');
+          rowHeader.className = `r-reaction-row-header ${isExpanded ? 'expanded' : ''}`;
 
-        const badgeEl = document.createElement('span');
-        badgeEl.className = 'r-badge r-badge-accent';
-        badgeEl.textContent = reactionConfig.gifReaction?.enabled && reactionConfig.textReaction?.enabled ? 'GIF + Text' : reactionConfig.gifReaction?.enabled ? 'GIF Only' : reactionConfig.textReaction?.enabled ? 'Text Only' : 'Inactive';
-        actionsDiv.appendChild(badgeEl);
+          const infoDiv = document.createElement('div');
+          infoDiv.className = 'r-reaction-row-info';
+          infoDiv.innerHTML = `
+            <span class="r-chevron">${isExpanded ? '▼' : '▶'}</span>
+            <span class="r-reaction-row-title">${displayLabel}</span>
+          `;
 
-        const editBtn = createButton({
-          text: isExpanded ? 'Close' : 'Edit',
-          variant: 'outline',
-          className: 'r-btn-xs',
-          onClick: (e) => {
-            e.stopPropagation();
-            expandedConfigId = isExpanded ? null : reactionConfig.id;
-            renderRegionsList();
-          }
-        });
-        actionsDiv.appendChild(editBtn);
+          const actionsDiv = document.createElement('div');
+          actionsDiv.className = 'r-reaction-row-actions';
+          actionsDiv.style.display = 'flex';
+          actionsDiv.style.alignItems = 'center';
+          actionsDiv.style.gap = '6px';
 
-        if (reactionConfigs.length > 1) {
           const deleteTriggerBtn = document.createElement('button');
           deleteTriggerBtn.className = 'r-btn-icon-remove';
-          deleteTriggerBtn.title = 'Remove Trigger Configuration';
+          deleteTriggerBtn.title = `Remove ${displayLabel}`;
           deleteTriggerBtn.innerHTML = '✕';
-          deleteTriggerBtn.onclick = (e) => {
+          deleteTriggerBtn.onclick = async (e) => {
             e.stopPropagation();
             region.reactionConfigs = region.reactionConfigs.filter(
               (c) => c.id !== reactionConfig.id
@@ -336,19 +326,22 @@ export function renderGameSetup({
               expandedConfigId = null;
             }
             renderRegionsList();
+            if (isGamePersisted) {
+              await persistGameConfiguration();
+            }
           };
           actionsDiv.appendChild(deleteTriggerBtn);
+
+          rowHeader.appendChild(infoDiv);
+          rowHeader.appendChild(actionsDiv);
+
+          rowHeader.onclick = () => {
+            expandedConfigId = isExpanded ? null : reactionConfig.id;
+            renderRegionsList();
+          };
+
+          row.appendChild(rowHeader);
         }
-
-        rowHeader.appendChild(infoDiv);
-        rowHeader.appendChild(actionsDiv);
-
-        rowHeader.onclick = () => {
-          expandedConfigId = isExpanded ? null : reactionConfig.id;
-          renderRegionsList();
-        };
-
-        row.appendChild(rowHeader);
 
         // Expandable Content Body (Screen C: Reaction Configuration Editor)
         if (isExpanded) {
@@ -357,13 +350,17 @@ export function renderGameSetup({
 
           const editor = createReactionEditor({
             config: reactionConfig,
-            onSave: (updatedConfig) => {
-              // Complete atomic save updating existing config in place by ID (Upsert)
+            configIndex,
+            isAreaSelected,
+            onSave: async (updatedConfig) => {
               const cleanConfig = {
                 ...updatedConfig,
-                id: reactionConfig.id
+                id: reactionConfig.id,
+                regionId: region.id
               };
               delete cleanConfig._isUnsavedDraft;
+
+              const previousSnapshot = JSON.parse(JSON.stringify(region.reactionConfigs));
               const existingIdx = region.reactionConfigs.findIndex((c) => c.id === reactionConfig.id);
               if (existingIdx >= 0) {
                 region.reactionConfigs[existingIdx] = cleanConfig;
@@ -371,25 +368,43 @@ export function renderGameSetup({
                 delete reactionConfig._isUnsavedDraft;
                 Object.assign(reactionConfig, cleanConfig);
               }
+
+              // Immediately persist game + region + reaction to storage and sync background detection
+              const persistRes = await persistGameConfiguration();
+              if (!persistRes.success) {
+                region.reactionConfigs = previousSnapshot;
+                return persistRes;
+              }
+
               expandedConfigId = null;
               renderRegionsList();
+              return { success: true };
             },
             onCancel: () => {
-              // Discard unsaved edits; remove transient draft if uncommitted
               if (reactionConfig._isUnsavedDraft) {
-                region.reactionConfigs = (region.reactionConfigs || []).filter(
-                  (c) => c.id !== reactionConfig.id
-                );
+                if (region.reactionConfigs.length > 1) {
+                  region.reactionConfigs = region.reactionConfigs.filter(
+                    (c) => c.id !== reactionConfig.id
+                  );
+                } else {
+                  const resetSlot = RegionManagementService.createReactionConfiguration(
+                    1,
+                    region.id,
+                    null
+                  );
+                  resetSlot.id = reactionConfig.id;
+                  resetSlot._isUnsavedDraft = true;
+                  region.reactionConfigs[0] = resetSlot;
+                  expandedConfigId = resetSlot.id;
+                  renderRegionsList();
+                  return;
+                }
               }
               expandedConfigId = null;
               renderRegionsList();
-            },
-            onPreview: (type, data) => {
-              alert(`[Preview] Triggering ${type} reaction overlay on active tab.`);
             }
           });
 
-          activeReactionEditor = editor;
           rowContent.appendChild(editor);
           row.appendChild(rowContent);
         }
@@ -397,41 +412,56 @@ export function renderGameSetup({
         reactionConfigsContainer.appendChild(row);
       });
 
+      // Show "Add Another Reaction" button underneath when saved reaction(s) are collapsed and count < 2
+      const hasCommittedReaction = reactionConfigs.some((c) => !c._isUnsavedDraft);
+      const hasOpenDraft = reactionConfigs.some((c) => c._isUnsavedDraft);
+      if (
+        hasCommittedReaction &&
+        !hasOpenDraft &&
+        RegionManagementService.canAddReaction(region)
+      ) {
+        const addAnotherReactionBtn = createButton({
+          text: 'Add Another Reaction',
+          variant: 'outline',
+          icon: '➕',
+          className: 'r-btn-full r-mt-sm',
+          onClick: () => {
+            const nextIndex = region.reactionConfigs.length + 1;
+            const newConfig = RegionManagementService.createReactionConfiguration(
+              nextIndex,
+              region.id,
+              null
+            );
+            newConfig._isUnsavedDraft = true;
+            region.reactionConfigs.push(newConfig);
+            expandedConfigId = newConfig.id;
+            renderRegionsList();
+          }
+        });
+        reactionConfigsContainer.appendChild(addAnotherReactionBtn);
+      }
+
       regionCard.appendChild(reactionConfigsContainer);
       regionsListContainer.appendChild(regionCard);
     });
-
-    // "Show an Add Another Region button after the saved region entries, using the approved product terminology consistently."
-    const addAnotherRegionBtn = createButton({
-      text: 'Add Another Region',
-      variant: 'outline',
-      icon: '➕',
-      className: 'r-btn-full r-mt-md',
-      onClick: () => {
-        const newRegion = RegionManagementService.createWatchRegion(watchRegions.length + 1);
-        watchRegions.push(newRegion);
-        expandedConfigId = newRegion.reactionConfigs[0].id;
-        renderRegionsList();
-        triggerSelectArea(newRegion);
-      }
-    });
-
-    regionsListContainer.appendChild(addAnotherRegionBtn);
   }
 
   function triggerSelectArea(region) {
     if (onTriggerAreaSelection) {
-      onTriggerAreaSelection(region.id, (capturedData) => {
+      onTriggerAreaSelection(region.id, async (capturedData) => {
         if (capturedData && capturedData.previewUrl) {
           region.previewUrl = capturedData.previewUrl;
           region.geometry = capturedData.geometry;
           renderRegionsList();
+          if (isGamePersisted) {
+            await persistGameConfiguration();
+          }
         }
       });
     }
   }
 
-  function applyCapturedRegion(captured) {
+  async function applyCapturedRegion(captured) {
     if (!captured || !captured.previewUrl) return;
     const target = watchRegions.find((r) => r.id === captured.regionId) || watchRegions[0];
     if (target) {
@@ -441,6 +471,9 @@ export function renderGameSetup({
         chrome.storage.local.remove(['reactron_last_captured_region']);
       }
       renderRegionsList();
+      if (isGamePersisted) {
+        await persistGameConfiguration();
+      }
     }
   }
 
@@ -474,71 +507,6 @@ export function renderGameSetup({
   bodyScroll.appendChild(regionsSection);
   container.appendChild(bodyScroll);
 
-  // Bottom Save & Complete Action
-  const footer = document.createElement('div');
-  footer.className = 'r-setup-footer';
-
-  const saveErrorBanner = document.createElement('div');
-  saveErrorBanner.className = 'r-save-error-banner';
-  saveErrorBanner.style.display = 'none';
-  saveErrorBanner.style.color = '#E9B765';
-  saveErrorBanner.style.fontSize = '12px';
-  saveErrorBanner.style.marginBottom = '8px';
-  saveErrorBanner.style.padding = '8px 12px';
-  saveErrorBanner.style.borderRadius = '6px';
-  saveErrorBanner.style.backgroundColor = 'rgba(233, 183, 101, 0.1)';
-  saveErrorBanner.style.border = '1px solid rgba(233, 183, 101, 0.3)';
-
-  const saveBtn = createButton({
-    text: 'Save Game Configuration',
-    variant: 'primary',
-    className: 'r-btn-full',
-    onClick: async () => {
-      saveErrorBanner.style.display = 'none';
-      saveErrorBanner.textContent = '';
-
-      // If a Reaction Editor is currently expanded, automatically flush/validate it first
-      if (expandedConfigId && activeReactionEditor && typeof activeReactionEditor.flushAndSave === 'function') {
-        const flushResult = await activeReactionEditor.flushAndSave();
-        if (flushResult && !flushResult.isValid) {
-          const errMsg = flushResult.error || 'Invalid reaction configuration.';
-          saveErrorBanner.textContent = `⚠️ Save Failed: ${errMsg}`;
-          saveErrorBanner.style.display = 'block';
-          return;
-        }
-      }
-
-      const valResult = validateGameName(currentGameName, existingGames, game.id);
-      if (!valResult.isValid) {
-        nameField.setError(valResult.error);
-        return;
-      }
-
-      if (onSaveGame) {
-        saveBtn.disabled = true;
-        const result = await onSaveGame({
-          ...game,
-          name: currentGameName.trim(),
-          watchRegions
-        });
-        saveBtn.disabled = false;
-
-        if (result && !result.success) {
-          const errMsg = result.error || 'Failed to save game configuration.';
-          nameField.setError(errMsg);
-          saveErrorBanner.textContent = `⚠️ Save Failed: ${errMsg}`;
-          saveErrorBanner.style.display = 'block';
-          return;
-        }
-      }
-
-      onBackToDashboard();
-    }
-  });
-
-  footer.appendChild(saveErrorBanner);
-  footer.appendChild(saveBtn);
-  container.appendChild(footer);
-
   return container;
 }
+
