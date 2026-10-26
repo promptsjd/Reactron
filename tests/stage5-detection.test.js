@@ -6,6 +6,7 @@ import { TriggerDebouncer, DEBOUNCER_STATES } from '../extension/services/trigge
 import { VisualDiffDetectionAdapter } from '../extension/services/detection-adapter.js';
 import { DetectionService, MONITORING_STATUS } from '../extension/services/detection-service.js';
 import { GameIdentityService } from '../extension/services/game-identity-service.js';
+import { ViewportLayoutService } from '../extension/services/viewport-layout-service.js';
 
 import { PersistenceService } from '../extension/services/persistence-service.js';
 import { GameManagementService } from '../extension/services/game-management-service.js';
@@ -368,4 +369,191 @@ describe('Phase 6: PersistenceService, GameManagementService & DetectionService 
     await service.stopSession(`${gameId}:202`);
   });
 });
+
+describe('Phase 7: ViewportLayoutService (Modular Browser Resize Adaptation)', () => {
+  test('normalizes Watch Region relative to game surface and projects accurately when browser is resized', () => {
+    // 1. Capture region while maximized (1920x1080) with a game canvas at (160, 40, 1600x900)
+    const maximizedSurface = {
+      left: 160,
+      top: 40,
+      width: 1600,
+      height: 900,
+      viewportWidth: 1920,
+      viewportHeight: 1080,
+      hasDedicatedSurface: true
+    };
+
+    // User selects a region at center of the game canvas: (x: 560, y: 265, w: 800, h: 450)
+    const normalized = ViewportLayoutService.normalizeRegionToSurface(
+      { x: 560, y: 265, width: 800, height: 450 },
+      maximizedSurface
+    );
+
+    assert.equal(normalized.surfaceX, 0.25);
+    assert.equal(normalized.surfaceY, 0.25);
+    assert.equal(normalized.surfaceWidth, 0.5);
+    assert.equal(normalized.surfaceHeight, 0.5);
+    assert.equal(normalized.surfaceRefWidth, 1600);
+    assert.equal(normalized.surfaceRefHeight, 900);
+
+    // 2. User resizes browser to smaller window (1000x800) where game canvas moves to (100, 175, 800x450)
+    const resizedSurface = {
+      left: 100,
+      top: 175,
+      width: 800,
+      height: 450,
+      viewportWidth: 1000,
+      viewportHeight: 800,
+      hasDedicatedSurface: true
+    };
+
+    const primaryCrop = ViewportLayoutService.projectRegionToScreenshot(
+      normalized,
+      resizedSurface,
+      1000,
+      800
+    );
+
+    // Expected crop inside resized canvas: left = 100 + 0.25*800 = 300, top = 175 + 0.25*450 = 288, w = 400, h = 225
+    assert.equal(primaryCrop.cropX, 300);
+    assert.equal(primaryCrop.cropY, 288);
+    assert.equal(primaryCrop.cropW, 400);
+    assert.equal(primaryCrop.cropH, 225);
+    assert.equal(primaryCrop.mode, 'surface');
+  });
+
+  test('projects aspect-ratio-contained crop when full-window canvas letterboxes on window resize', () => {
+    // Captured maximized at 1920x1080 (16:9)
+    const geom = {
+      x: 0.5,
+      y: 0.5,
+      width: 0.2,
+      height: 0.2,
+      viewportWidth: 1920,
+      viewportHeight: 1080
+    };
+
+    // Resized to a tall/narrow split window: 960x1080 (16:9 stage letterboxes to 960x540 at top=270)
+    const candidates = ViewportLayoutService.getCandidateProjections(geom, null, 960, 1080);
+    const aspectCandidate = candidates.find((c) => c.mode === 'aspect-contain');
+    const viewportCandidate = candidates.find((c) => c.mode === 'viewport');
+
+    assert.ok(aspectCandidate, 'Should produce aspect-contain candidate when aspect ratio changes');
+    assert.ok(viewportCandidate, 'Should also retain direct viewport candidate');
+    assert.equal(aspectCandidate.cropX, 480);
+    assert.equal(aspectCandidate.cropY, 540); // 270 + 0.5 * 540
+    assert.equal(aspectCandidate.cropW, 192); // 0.2 * 960
+    assert.equal(aspectCandidate.cropH, 108); // 0.2 * 540
+  });
+
+  test('scales GIF size and Text fontSize proportionally and adjusts reaction x/y on browser resize', () => {
+    const maximizedSurface = {
+      left: 0,
+      top: 0,
+      width: 1920,
+      height: 1080,
+      viewportWidth: 1920,
+      viewportHeight: 1080,
+      hasDedicatedSurface: true
+    };
+
+    // Position reaction at (960, 378) -> xRatio: 0.5, yRatio: 0.35 while maximized
+    const savedPos = ViewportLayoutService.normalizePositionToSurface(960, 378, maximizedSurface);
+    assert.equal(savedPos.xRatio, 0.5);
+    assert.equal(savedPos.yRatio, 0.35);
+    assert.equal(savedPos.referenceWidth, 1920);
+    assert.equal(savedPos.referenceHeight, 1080);
+
+    // Resize browser to half-size window (960x540)
+    const halfSurface = {
+      left: 0,
+      top: 0,
+      width: 960,
+      height: 540,
+      viewportWidth: 960,
+      viewportHeight: 540,
+      hasDedicatedSurface: true
+    };
+
+    const scale = ViewportLayoutService.computeScaleFactor(savedPos, halfSurface);
+    assert.equal(scale, 0.5, 'Scale factor should be 0.5 when window is resized to half dimensions');
+
+    // Resize browser to letterboxed container (canvas at left: 100, top: 200, width: 960, height: 540 inside 1160x940 window)
+    const offsetSurface = {
+      left: 100,
+      top: 200,
+      width: 960,
+      height: 540,
+      viewportWidth: 1160,
+      viewportHeight: 940,
+      hasDedicatedSurface: true
+    };
+
+    const projectedPos = ViewportLayoutService.projectPositionToViewport(savedPos, offsetSurface);
+    // Expected pixel X = 100 + 0.5 * 960 = 580 -> 580 / 1160 = 0.5
+    // Expected pixel Y = 200 + 0.35 * 540 = 389 -> 389 / 940 = 0.4138
+    assert.equal(projectedPos.xRatio, 0.5);
+    assert.equal(projectedPos.yRatio, 0.4138);
+  });
+
+  test('supports multi-area setup (Select Area 1 & Select Area 2) with independent persistence and reactions', async () => {
+    const gameMgmt = new GameManagementService();
+    await gameMgmt.initialize();
+
+    const draft = gameMgmt.createDraftGame('https://poki.com/en/g/arena-duel', 'Arena Duel');
+    const area1 = RegionManagementService.createWatchRegion(draft.id);
+
+    // 1. Dynamic naming without hardcoding
+    assert.equal(RegionManagementService.formatRegionSelectLabel(area1, 0), 'Select Area 1');
+    assert.equal(RegionManagementService.canAddRegion([area1]), false, 'Cannot add Area 2 before Area 1 is configured');
+
+    // 2. Capture Area 1, still no saved reaction -> cannot add Area 2 yet
+    area1.previewUrl = 'data:image/png;base64,AREA1_PREVIEW';
+    area1.geometry = { x: 0.1, y: 0.1, width: 0.2, height: 0.1, viewportWidth: 1280, viewportHeight: 720 };
+    assert.equal(RegionManagementService.formatRegionSelectLabel(area1, 0), 'Reselect Area 1');
+    assert.equal(RegionManagementService.canAddRegion([area1]), false, 'Cannot add Area 2 until Area 1 has a saved reaction');
+
+    // 3. Add unsaved draft reaction to Area 1 -> still cannot add Area 2
+    const draftReaction1 = RegionManagementService.createReactionConfiguration(1, area1.id, 'text');
+    draftReaction1._isUnsavedDraft = true;
+    area1.reactionConfigs = [draftReaction1];
+    assert.equal(RegionManagementService.canAddRegion([area1]), false);
+
+    // 4. Commit/save Reaction 1 on Area 1 ("YOU WON!") -> now Area 2 can be added
+    delete draftReaction1._isUnsavedDraft;
+    draftReaction1.textReaction.enabled = true;
+    draftReaction1.textReaction.text = 'YOU WON!';
+    assert.equal(RegionManagementService.isRegionConfigured(area1), true);
+    assert.equal(RegionManagementService.canAddRegion([area1]), true);
+
+    // 5. Add Area 2 and configure it ("YOU LOST!")
+    const area2 = RegionManagementService.createWatchRegion(draft.id);
+    assert.equal(RegionManagementService.formatRegionSelectLabel(area2, 1), 'Select Area 2');
+    assert.equal(RegionManagementService.canAddRegion([area1, area2]), false, 'Max 2 areas per game');
+
+    area2.previewUrl = 'data:image/png;base64,AREA2_PREVIEW';
+    area2.geometry = { x: 0.6, y: 0.8, width: 0.2, height: 0.1, viewportWidth: 1280, viewportHeight: 720 };
+    assert.equal(RegionManagementService.formatRegionSelectLabel(area2, 1), 'Reselect Area 2');
+
+    const reaction2 = RegionManagementService.createReactionConfiguration(1, area2.id, 'text');
+    reaction2.textReaction.enabled = true;
+    reaction2.textReaction.text = 'YOU LOST!';
+    area2.reactionConfigs = [reaction2];
+
+    draft.watchRegions = [area1, area2];
+    const saveRes = await gameMgmt.saveGame(draft);
+    assert.equal(saveRes.success, true);
+
+    const saved = gameMgmt.getGameById(draft.id);
+    assert.equal(saved.watchRegions.length, 2);
+    assert.equal(saved.watchRegions[0].id, area1.id);
+    assert.equal(saved.watchRegions[0].reactionConfigs[0].textReaction.text, 'YOU WON!');
+    assert.equal(saved.watchRegions[1].id, area2.id);
+    assert.equal(saved.watchRegions[1].reactionConfigs[0].textReaction.text, 'YOU LOST!');
+
+    await gameMgmt.deleteGame(draft.id);
+  });
+});
+
+
 

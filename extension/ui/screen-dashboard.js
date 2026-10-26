@@ -17,12 +17,10 @@ import { createButton, createToggle, createEmptyState } from './components.js';
 
 export function renderDashboard({
   games,
-  gameStatuses = null,
   onNavigateToGameSetup,
   onNavigateToLibrary,
   onToggleGame,
   onDeleteGame,
-  onToggleEmptyState,
   onAddGameFromTab
 }) {
   const container = document.createElement('div');

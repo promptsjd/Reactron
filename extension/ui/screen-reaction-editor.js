@@ -43,8 +43,7 @@ export function createReactionEditor({
   configIndex = 0,
   isAreaSelected = false,
   onSave,
-  onCancel,
-  onPreview
+  onCancel
 }) {
   const editorRoot = document.createElement('div');
   editorRoot.className = 'r-reaction-editor';
@@ -430,7 +429,6 @@ export function createReactionEditor({
       await commitActiveRepositionIfNeeded();
       const immediateConfig = buildImmediatePreviewConfig(REACTION_CONFIG_CONSTANTS.TYPES.GIF);
       await OverlayEngineService.previewReaction(null, immediateConfig);
-      if (onPreview) onPreview('gif', immediateConfig);
     }
   });
   gifFieldsContainer.appendChild(previewGifBtn);
@@ -684,7 +682,6 @@ export function createReactionEditor({
       await commitActiveRepositionIfNeeded();
       const immediateConfig = buildImmediatePreviewConfig(REACTION_CONFIG_CONSTANTS.TYPES.TEXT);
       await OverlayEngineService.previewReaction(null, immediateConfig);
-      if (onPreview) onPreview('text', immediateConfig);
     }
   });
   textFieldsContainer.appendChild(previewTextBtn);
@@ -840,12 +837,6 @@ export function createReactionEditor({
     }
     return { isValid: true, config: finalConfig };
   }
-
-  editorRoot.flushAndSave = flushAndSave;
-  editorRoot.hasSelectedType = () => Boolean(selectedType);
-  editorRoot.setAreaSelected = (selected) => {
-    radioGroup.setDisabled(!selected);
-  };
 
   const saveBtn = createButton({
     text: 'Save',

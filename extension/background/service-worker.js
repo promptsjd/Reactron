@@ -5,7 +5,6 @@
  * 1. Capture tab visible pixels via chrome.tabs.captureVisibleTab (avoids canvas tainting / WebGL buffer clears)
  * 2. Run continuous visual fingerprint monitoring in the background even when the side panel is closed
  * 3. Route messages between popup and content scripts
- * 4. Handle helper commands (e.g., opening bundled test-game.html)
  */
 
 import { persistenceService } from '../services/persistence-service.js';
@@ -13,17 +12,24 @@ import { detectionService } from '../services/detection-service.js';
 import { STORAGE_KEYS } from '../shared/schema.js';
 
 let isSyncing = false;
+let pendingSync = false;
 
 /**
  * Synchronizes active background detection sessions with persisted games
  */
 async function syncBackgroundDetection() {
-  if (isSyncing) return;
+  if (isSyncing) {
+    pendingSync = true;
+    return;
+  }
   isSyncing = true;
   try {
-    await persistenceService.initialize();
-    const games = await persistenceService.getGames();
-    await detectionService.syncWithGames(games);
+    do {
+      pendingSync = false;
+      await persistenceService.initialize();
+      const games = await persistenceService.getGames();
+      await detectionService.syncWithGames(games);
+    } while (pendingSync);
   } catch (err) {
     console.warn('[Reactron] Background detection sync warning:', err);
   } finally {
@@ -128,23 +134,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     ensureBackgroundDetectionAlive()
       .then(() => sendResponse({ success: true }))
       .catch(() => sendResponse({ success: false }));
-    return true;
-  }
-
-  if (message.action === 'OPEN_TEST_GAME') {
-    const testGameUrl = chrome.runtime.getURL('test-game.html');
-    chrome.tabs.create({ url: testGameUrl }, (tab) => {
-      sendResponse({ success: true, tabId: tab.id });
-    });
-    return true;
-  }
-
-  if (message.action === 'GET_EXTENSION_INFO') {
-    sendResponse({
-      name: chrome.runtime.getManifest().name,
-      version: chrome.runtime.getManifest().version,
-      id: chrome.runtime.id
-    });
     return true;
   }
 });

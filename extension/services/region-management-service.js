@@ -2,20 +2,67 @@
  * Reactron Watch Region & Reaction Configuration Management Service
  * 
  * Responsibilities:
- * 1. Watch Region creation, removal, and normalized coordinate conversion.
- * 2. Reaction Configuration management (GIF, Text, or both).
- * 3. Configuration label generation policy:
- *    - Both reaction names provided: "Name1 | Name2"
- *    - One provided: "Name"
- *    - Neither provided: Generated display label ("Reaction 1", "Reaction 2")
- *    - Keeps generated labels separate from user-entered names.
+ * 1. Watch Region creation and removal.
+ * 2. Reaction Configuration management (GIF or Text).
+ * 3. Configuration label generation ("Reaction 1", "Reaction 2").
  * 4. Atomic Save & Cancel preserving omitted sections without inventing fake content.
  */
 
 import { GameIdentityService } from './game-identity-service.js';
-import { REACTION_CONFIG_CONSTANTS } from '../shared/types.js';
+import { REACTION_CONFIG_CONSTANTS, WATCH_REGION_CONSTANTS } from '../shared/types.js';
 
 export class RegionManagementService {
+  /**
+   * Generates a formatted display label for a Watch Region's area selection button
+   * Uses centralized naming rule ("Select Area 1", "Reselect Area 1", "Select Area 2", etc.)
+   * @param {import('../shared/types.js').WatchRegion} region
+   * @param {number} [index=0] - 0-based index in the game's watchRegions list
+   * @returns {string}
+   */
+  static formatRegionSelectLabel(region, index = 0) {
+    const prefix = region?.previewUrl
+      ? WATCH_REGION_CONSTANTS.RESELECT_LABEL_PREFIX
+      : WATCH_REGION_CONSTANTS.SELECT_LABEL_PREFIX;
+    return `${prefix} ${index + 1}`;
+  }
+
+  /**
+   * Checks whether a Watch Region has completed the setup journey
+   * (has a captured area and at least one saved reaction configuration)
+   * @param {import('../shared/types.js').WatchRegion} region
+   * @returns {boolean}
+   */
+  static isRegionConfigured(region) {
+    if (!region || !region.previewUrl || !region.geometry) {
+      return false;
+    }
+    if (!Array.isArray(region.reactionConfigs)) {
+      return false;
+    }
+    return region.reactionConfigs.some(
+      (cfg) =>
+        cfg &&
+        !cfg._isUnsavedDraft &&
+        Boolean(cfg.type || cfg.gifReaction?.enabled || cfg.textReaction?.enabled)
+    );
+  }
+
+  /**
+   * Checks whether the game can accept another Watch Region
+   * Requires existing region(s) to be configured and total count < MAX_REGIONS_PER_GAME
+   * @param {Array<import('../shared/types.js').WatchRegion>} watchRegions
+   * @returns {boolean}
+   */
+  static canAddRegion(watchRegions) {
+    if (!Array.isArray(watchRegions) || watchRegions.length === 0) {
+      return false;
+    }
+    if (watchRegions.length >= WATCH_REGION_CONSTANTS.MAX_REGIONS_PER_GAME) {
+      return false;
+    }
+    return watchRegions.every((r) => RegionManagementService.isRegionConfigured(r));
+  }
+
   /**
    * Generates a formatted display label for a Reaction Configuration
    * Uses centralized naming rule ("Reaction 1", "Reaction 2") without requiring user-entered names.
@@ -101,31 +148,23 @@ export class RegionManagementService {
   }
 
   /**
-   * Converts client viewport pixel coordinates to normalized viewport ratios (0.0 to 1.0)
-   * Ensures resolution independence across different window sizes and DPRs.
-   * @param {{x: number, y: number, width: number, height: number}} pixelCoords
-   * @param {number} viewportWidth
-   * @param {number} viewportHeight
-   * @returns {import('../shared/types.js').NormalizedGeometry}
+   * Clears captured preview and geometry from a watch region
+   * @param {import('../shared/types.js').WatchRegion} region
    */
-  static normalizeCoordinates(pixelCoords, viewportWidth, viewportHeight) {
-    const vw = Math.max(viewportWidth, 1);
-    const vh = Math.max(viewportHeight, 1);
+  static clearRegionArea(region) {
+    if (!region) return;
+    region.previewUrl = null;
+    region.geometry = null;
+  }
 
-    // Clamp coordinates inside content viewport (excluding scrollbars/browser chrome)
-    const clampedX = Math.max(0, Math.min(pixelCoords.x, vw));
-    const clampedY = Math.max(0, Math.min(pixelCoords.y, vh));
-    const clampedW = Math.max(1, Math.min(pixelCoords.width, vw - clampedX));
-    const clampedH = Math.max(1, Math.min(pixelCoords.height, vh - clampedY));
-
-    return {
-      x: Number((clampedX / vw).toFixed(4)),
-      y: Number((clampedY / vh).toFixed(4)),
-      width: Number((clampedW / vw).toFixed(4)),
-      height: Number((clampedH / vh).toFixed(4)),
-      viewportWidth: vw,
-      viewportHeight: vh
-    };
+  /**
+   * Removes a reaction configuration by ID from a watch region
+   * @param {import('../shared/types.js').WatchRegion} region
+   * @param {string} reactionId
+   */
+  static removeReactionConfiguration(region, reactionId) {
+    if (!region || !Array.isArray(region.reactionConfigs)) return;
+    region.reactionConfigs = region.reactionConfigs.filter((c) => c.id !== reactionId);
   }
 
   /**

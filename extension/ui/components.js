@@ -4,8 +4,6 @@
  * Guarantees zero UI component duplication across screens.
  */
 
-import { DESIGN_TOKENS } from '../shared/design-tokens.js';
-
 /**
  * Creates a Button component
  * @param {Object} options
@@ -527,22 +525,6 @@ export function createEmptyState({ icon, title, description, action = null }) {
 }
 
 /**
- * Creates a Card container
- * @param {Object} options
- * @param {string} [options.className='']
- * @param {Array<HTMLElement>} [options.children=[]]
- * @returns {HTMLDivElement}
- */
-export function createCard({ className = '', children = [] } = {}) {
-  const card = document.createElement('div');
-  card.className = `r-card ${className}`.trim();
-  children.forEach((child) => {
-    if (child) card.appendChild(child);
-  });
-  return card;
-}
-
-/**
  * Creates a Radio Group component
  * @param {Object} options
  * @param {string} options.name - Radio group name attribute
@@ -610,17 +592,6 @@ export function createRadioGroup({
         label.classList.add('disabled');
       } else {
         label.classList.remove('disabled');
-      }
-    });
-  };
-
-  container.setValue = (val) => {
-    inputs.forEach(({ label, radio }) => {
-      radio.checked = radio.value === val;
-      if (radio.checked) {
-        label.classList.add('selected');
-      } else {
-        label.classList.remove('selected');
       }
     });
   };
@@ -855,14 +826,6 @@ export function createPresetDropdown({
     if (isOpen) {
       renderMenuItems();
     }
-  };
-
-  container.clearSelection = () => {
-    triggerContent.innerHTML = '';
-    const ph = document.createElement('span');
-    ph.className = 'r-preset-dropdown-placeholder';
-    ph.textContent = placeholder;
-    triggerContent.appendChild(ph);
   };
 
   return container;

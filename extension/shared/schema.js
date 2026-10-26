@@ -21,7 +21,7 @@ export const STORAGE_KEYS = {
   SCHEMA_VERSION: 'reactron_schema_version',
   GAMES: 'reactron_games_store',
   LIBRARY_PRESETS: 'reactron_library_presets_store',
-  META: 'reactron_storage_meta'
+  LAST_CAPTURED_REGION: 'reactron_last_captured_region'
 };
 
 const LEGACY_SAMPLE_PRESET_IDS = new Set(['lib_lib-g-1', 'lib_lib-t-1', 'lib-g-1', 'lib-t-1']);

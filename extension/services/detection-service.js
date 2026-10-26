@@ -21,6 +21,7 @@ import { StrictnessMapper } from './strictness-mapper.js';
 import { TriggerDebouncer } from './trigger-debouncer.js';
 import { OverlayEngineService } from './overlay-engine.js';
 import { GameIdentityService } from './game-identity-service.js';
+import { ViewportLayoutService } from './viewport-layout-service.js';
 import { mediaStorage } from './media-storage.js';
 
 export const MONITORING_STATUS = {
@@ -368,6 +369,9 @@ export class DetectionService {
       session.sampleCount++;
       session.lastSampleTimestamp = Date.now();
 
+      // Query live game surface bounds from the active tab (falls back to null if unavailable)
+      const liveBounds = await this._queryLiveSurfaceBounds(session.tabId);
+
       // 4. Iterate over configured watch regions with geometry & baseline preview
       for (const region of game.watchRegions) {
         if (!region.geometry || !region.previewUrl) continue;
@@ -380,15 +384,34 @@ export class DetectionService {
 
         if (!baseline) continue;
 
-        // Crop current captured frame to region's normalized coordinates
-        const currentCrop = await this._cropImageToPixels(captureResult.dataUrl, region.geometry);
-        if (!currentCrop) continue;
-
         // Map strictness slider (1 - 100%) to detection threshold
         const threshold = StrictnessMapper.mapToChangeDeltaThreshold(region.strictness);
 
-        // Execute detection comparison via pluggable adapter
-        const compResult = this.adapter.compare(currentCrop, baseline, { threshold });
+        // Evaluate candidate crops across resize modes (surface-anchored, aspect-contained, viewport)
+        let candidateCrops = [];
+        if (this._cropImageToPixels !== DetectionService.prototype._cropImageToPixels) {
+          const singleCrop = await this._cropImageToPixels(captureResult.dataUrl, region.geometry, liveBounds);
+          if (singleCrop) candidateCrops = [singleCrop];
+        } else {
+          candidateCrops = await this._cropImageCandidatesToPixels(
+            captureResult.dataUrl,
+            region.geometry,
+            liveBounds
+          );
+        }
+
+        if (!candidateCrops || candidateCrops.length === 0) continue;
+
+        let bestCompResult = null;
+        for (const crop of candidateCrops) {
+          const res = this.adapter.compare(crop, baseline, { threshold });
+          if (!bestCompResult || res.delta > bestCompResult.delta) {
+            bestCompResult = res;
+          }
+        }
+
+        if (!bestCompResult) continue;
+        const compResult = bestCompResult;
         session.lastMeasuredDelta = compResult.delta;
 
         // Evaluate trigger condition with debouncer & cooldown manager
@@ -429,6 +452,7 @@ export class DetectionService {
                 await OverlayEngineService.triggerReaction(session.tabId, config, {
                   regionId: region.id,
                   regionName: region.name,
+                  regionGeometry: region.geometry,
                   delta: compResult.delta,
                   threshold
                 });
@@ -440,6 +464,35 @@ export class DetectionService {
     } finally {
       session.isSampling = false;
     }
+  }
+
+  /**
+   * Queries live game surface bounds from the content script on the monitored tab
+   * @param {number} tabId
+   * @returns {Promise<Object|null>}
+   * @private
+   */
+  async _queryLiveSurfaceBounds(tabId) {
+    if (!tabId || typeof chrome === 'undefined' || !chrome.tabs || typeof chrome.tabs.sendMessage !== 'function') {
+      return null;
+    }
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 150);
+      try {
+        chrome.tabs.sendMessage(tabId, { action: 'GET_LIVE_SURFACE_BOUNDS' }, (res) => {
+          clearTimeout(timer);
+          if (chrome.runtime && chrome.runtime.lastError) {
+            resolve(null);
+          } else {
+            resolve(res?.bounds || null);
+          }
+        });
+      } catch {
+        clearTimeout(timer);
+        resolve(null);
+      }
+    });
   }
 
   /**
@@ -477,31 +530,40 @@ export class DetectionService {
   }
 
   /**
-   * Helper: crops full captured viewport to normalized region coordinates and returns pixel buffer
+   * Extracts pixel buffers for all unique candidate projections of a Watch Region
+   * across window resize modes (DOM surface bounds, aspect-ratio contain, direct viewport).
+   * @param {string} dataUrl
+   * @param {import('../shared/types.js').NormalizedGeometry} geometry
+   * @param {Object|null} [liveBounds=null]
+   * @returns {Promise<Array<ImageData>>}
    * @private
    */
-  async _cropImageToPixels(dataUrl, geometry) {
+  async _cropImageCandidatesToPixels(dataUrl, geometry, liveBounds = null) {
     if (typeof OffscreenCanvas !== 'undefined') {
       try {
         const resp = await fetch(dataUrl);
         const blob = await resp.blob();
         const bitmap = await createImageBitmap(blob);
 
-        const cropX = Math.round(geometry.x * bitmap.width);
-        const cropY = Math.round(geometry.y * bitmap.height);
-        const cropW = Math.max(1, Math.round(geometry.width * bitmap.width));
-        const cropH = Math.max(1, Math.round(geometry.height * bitmap.height));
+        const projections = ViewportLayoutService.getCandidateProjections(
+          geometry,
+          liveBounds,
+          bitmap.width,
+          bitmap.height
+        );
 
-        const canvas = new OffscreenCanvas(cropW, cropH);
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return null;
-
-        ctx.drawImage(bitmap, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-        const imgData = ctx.getImageData(0, 0, cropW, cropH);
-        return imgData;
+        const results = [];
+        for (const rect of projections) {
+          const canvas = new OffscreenCanvas(rect.cropW, rect.cropH);
+          const ctx = canvas.getContext('2d');
+          if (!ctx) continue;
+          ctx.drawImage(bitmap, rect.cropX, rect.cropY, rect.cropW, rect.cropH, 0, 0, rect.cropW, rect.cropH);
+          results.push(ctx.getImageData(0, 0, rect.cropW, rect.cropH));
+        }
+        return results;
       } catch (err) {
-        console.warn('[DetectionService] Offscreen crop failed:', err);
-        return null;
+        console.warn('[DetectionService] Offscreen candidate crop failed:', err);
+        return [];
       }
     }
 
@@ -510,28 +572,39 @@ export class DetectionService {
       return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
-          const cropX = Math.round(geometry.x * img.naturalWidth);
-          const cropY = Math.round(geometry.y * img.naturalHeight);
-          const cropW = Math.max(1, Math.round(geometry.width * img.naturalWidth));
-          const cropH = Math.max(1, Math.round(geometry.height * img.naturalHeight));
-
-          const canvas = document.createElement('canvas');
-          canvas.width = cropW;
-          canvas.height = cropH;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            resolve(null);
-            return;
+          const projections = ViewportLayoutService.getCandidateProjections(
+            geometry,
+            liveBounds,
+            img.naturalWidth,
+            img.naturalHeight
+          );
+          const results = [];
+          for (const rect of projections) {
+            const canvas = document.createElement('canvas');
+            canvas.width = rect.cropW;
+            canvas.height = rect.cropH;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) continue;
+            ctx.drawImage(img, rect.cropX, rect.cropY, rect.cropW, rect.cropH, 0, 0, rect.cropW, rect.cropH);
+            results.push(ctx.getImageData(0, 0, rect.cropW, rect.cropH));
           }
-          ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-          resolve(ctx.getImageData(0, 0, cropW, cropH));
+          resolve(results);
         };
-        img.onerror = () => resolve(null);
+        img.onerror = () => resolve([]);
         img.src = dataUrl;
       });
     }
 
-    return null;
+    return [];
+  }
+
+  /**
+   * Helper: crops full captured viewport to primary projected region coordinates and returns pixel buffer
+   * @private
+   */
+  async _cropImageToPixels(dataUrl, geometry, liveBounds = null) {
+    const candidates = await this._cropImageCandidatesToPixels(dataUrl, geometry, liveBounds);
+    return candidates.length > 0 ? candidates[0] : null;
   }
 
   /**

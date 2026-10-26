@@ -19,13 +19,7 @@ export const STRICTNESS_BOUNDS = {
   // At strictness 1: triggers if similarity >= 70% (lenient)
   // At strictness 100: requires similarity >= 95% (strict/exact match)
   MATCH_MIN_THRESHOLD_PERCENT: 70.0,
-  MATCH_MAX_THRESHOLD_PERCENT: 95.0,
-
-  // Backward compatibility aliases
-  CHANGE_MIN_DELTA_PERCENT: 70.0,
-  CHANGE_MAX_DELTA_PERCENT: 95.0,
-  MATCH_MAX_MISMATCH_PERCENT: 30.0,
-  MATCH_MIN_MISMATCH_PERCENT: 5.0
+  MATCH_MAX_THRESHOLD_PERCENT: 95.0
 };
 
 export const STRICTNESS_LEVELS = [
@@ -89,16 +83,6 @@ export class StrictnessMapper {
   }
 
   /**
-   * Returns the smart strictness level for a discrete slider index (0 - 3)
-   * @param {number} stepIndex
-   * @returns {{index: number, value: number, shortLabel: string, helperText: string}}
-   */
-  static getLevelByIndex(stepIndex) {
-    const idx = Math.max(0, Math.min(STRICTNESS_LEVELS.length - 1, Math.round(Number(stepIndex) || 0)));
-    return STRICTNESS_LEVELS[idx];
-  }
-
-  /**
    * Maps slider value (1-100) to required match similarity threshold percentage
    * Formula: threshold = MIN + (MAX - MIN) * ((strictness - 1) / (100 - 1))
    * 
@@ -111,14 +95,6 @@ export class StrictnessMapper {
     const ratio = (s - STRICTNESS_BOUNDS.MIN_SLIDER) / (STRICTNESS_BOUNDS.MAX_SLIDER - STRICTNESS_BOUNDS.MIN_SLIDER);
     const threshold = STRICTNESS_BOUNDS.MATCH_MIN_THRESHOLD_PERCENT + (range * ratio);
     return Number(threshold.toFixed(2));
-  }
-
-  /**
-   * Alias for match tolerance mapping
-   */
-  static mapToMatchTolerance(strictness) {
-    const s = this.clamp(strictness);
-    return Number((100.0 - this.mapToChangeDeltaThreshold(s)).toFixed(2));
   }
 
   /**

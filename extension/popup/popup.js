@@ -12,6 +12,7 @@
 import { gameManagementService } from '../services/game-management-service.js';
 import { persistenceService } from '../services/persistence-service.js';
 import { detectionService } from '../services/detection-service.js';
+import { OverlayEngineService } from '../services/overlay-engine.js';
 import { renderDashboard } from '../ui/screen-dashboard.js';
 import { renderGameSetup } from '../ui/screen-game-setup.js';
 import { renderLibrary } from '../ui/screen-library.js';
@@ -23,6 +24,7 @@ class AppController {
     this.selectedGameId = null;
     this.draftGame = null;
     this.activeTabInfo = null;
+    this.activeScreenCleanup = null;
   }
 
   async init() {
@@ -47,19 +49,25 @@ class AppController {
 
   async _syncDetection() {
     try {
+      const currentGames = gameManagementService.getGames();
       if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
         await new Promise((resolve) => {
           chrome.runtime.sendMessage({ action: 'SYNC_DETECTION_GAMES' }, () => {
             if (chrome.runtime.lastError) {
               // Fallback if service worker is waking up
-              detectionService.syncWithGames(gameManagementService.getGames()).finally(resolve);
+              detectionService.syncWithGames(currentGames).finally(resolve);
             } else {
-              resolve();
+              // Also ensure any previously started fallback sessions in popup context are reconciled
+              if (detectionService.hasLoadedGames()) {
+                detectionService.syncWithGames(currentGames).finally(resolve);
+              } else {
+                resolve();
+              }
             }
           });
         });
       } else {
-        await detectionService.syncWithGames(gameManagementService.getGames());
+        await detectionService.syncWithGames(currentGames);
       }
     } catch (err) {
       console.warn('[Reactron] Detection sync warning:', err);
@@ -77,6 +85,16 @@ class AppController {
       this.appRoot = document.getElementById('app');
     }
     if (!this.appRoot) return;
+
+    if (typeof this.activeScreenCleanup === 'function') {
+      try {
+        this.activeScreenCleanup();
+      } catch (err) {
+        console.warn('[Reactron] Screen cleanup warning:', err);
+      }
+      this.activeScreenCleanup = null;
+    }
+
     this.appRoot.innerHTML = '';
 
     const games = gameManagementService.getGames();
@@ -93,7 +111,14 @@ class AppController {
             this.render();
           },
           onDeleteGame: async (gameId) => {
+            if (this.selectedGameId === gameId) {
+              this.selectedGameId = null;
+            }
+            if (this.draftGame?.id === gameId) {
+              this.draftGame = null;
+            }
             await gameManagementService.deleteGame(gameId);
+            await OverlayEngineService.clearOverlays(null);
             await this._syncDetection();
             this.render();
           },
@@ -115,6 +140,9 @@ class AppController {
               onNotify(existingGame, null);
               return;
             }
+
+            // Clear any residual captured region cache before starting a fresh draft game
+            await persistenceService.clearCapturedRegionCache();
 
             // Create draft game with stable internal ID
             this.draftGame = gameManagementService.createDraftGame(tabInfo.url, tabInfo.title);
@@ -256,6 +284,7 @@ class AppController {
             }
           }
         });
+        this.activeScreenCleanup = () => gameSetupView.cleanup?.();
         this.appRoot.appendChild(gameSetupView);
         break;
       }

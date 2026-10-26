@@ -37,10 +37,8 @@ async function packExtension() {
   });
 
   const zipPathPrimary = path.join(publicDir, 'reactron-extension.zip');
-  const zipPathSpike = path.join(publicDir, 'reactron-spike-extension.zip');
 
   fs.writeFileSync(zipPathPrimary, zipBuffer);
-  fs.writeFileSync(zipPathSpike, zipBuffer);
   console.log(`Successfully created: ${zipPathPrimary} (${(zipBuffer.length / 1024).toFixed(2)} KB)`);
 }
 

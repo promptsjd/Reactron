@@ -13,6 +13,13 @@
  * @property {number} height - Height ratio (0.0 to 1.0)
  * @property {number} viewportWidth - Viewport width at capture time
  * @property {number} viewportHeight - Viewport height at capture time
+ * @property {number} [surfaceX] - Game surface-relative left offset ratio (0.0 to 1.0)
+ * @property {number} [surfaceY] - Game surface-relative top offset ratio (0.0 to 1.0)
+ * @property {number} [surfaceWidth] - Game surface-relative width ratio (0.0 to 1.0)
+ * @property {number} [surfaceHeight] - Game surface-relative height ratio (0.0 to 1.0)
+ * @property {number} [surfaceRefWidth] - Game surface width in CSS px at capture time
+ * @property {number} [surfaceRefHeight] - Game surface height in CSS px at capture time
+ * @property {boolean} [hasDedicatedSurface] - Whether a dedicated game canvas/iframe was resolved
  */
 
 /**
@@ -20,6 +27,12 @@
  * @typedef {Object} NormalizedPosition
  * @property {number} xRatio - Center X ratio (0.0 to 1.0, 0.5 is horizontal center)
  * @property {number} yRatio - Center Y ratio (0.0 to 1.0, 0.35 is upper third)
+ * @property {number} [surfaceXRatio] - Center X ratio relative to active game surface
+ * @property {number} [surfaceYRatio] - Center Y ratio relative to active game surface
+ * @property {number} [referenceWidth] - Game surface width at positioning time
+ * @property {number} [referenceHeight] - Game surface height at positioning time
+ * @property {number} [viewportWidth] - Viewport width at positioning time
+ * @property {number} [viewportHeight] - Viewport height at positioning time
  */
 
 /**
@@ -115,6 +128,13 @@ export const MEDIA_LIMITS = {
   MAX_FILE_SIZE_MB: 4,
   ALLOWED_MIME_TYPES: ['image/gif', 'image/png', 'image/jpeg', 'image/webp'],
   ALLOWED_EXTENSIONS: ['.gif', '.png', '.jpg', '.jpeg', '.webp']
+};
+
+export const WATCH_REGION_CONSTANTS = {
+  MAX_REGIONS_PER_GAME: 2,
+  SELECT_LABEL_PREFIX: 'Select Area',
+  RESELECT_LABEL_PREFIX: 'Reselect Area',
+  ADD_ANOTHER_LABEL: 'Add Another Area'
 };
 
 export const REACTION_CONFIG_CONSTANTS = {

@@ -5,15 +5,12 @@
 
 export const VALIDATION_LIMITS = {
   GAME_NAME_MAX_LENGTH: 15,
-  REACTION_NAME_MAX_LENGTH: 15,
   DELAY_MIN: 0,
   DELAY_MAX: 3,
   DELAY_STEP: 0.5,
   DURATION_MIN: 1,
   DURATION_MAX: 10,
-  DURATION_STEP: 1,
-  STRICTNESS_MIN: 1,
-  STRICTNESS_MAX: 100
+  DURATION_STEP: 1
 };
 
 /**
@@ -49,27 +46,6 @@ export function validateGameName(name, existingGames = [], currentGameId = null)
     return {
       isValid: false,
       error: 'A game with this name already exists'
-    };
-  }
-
-  return {
-    isValid: true,
-    error: null
-  };
-}
-
-/**
- * Validates a Reaction Name input
- * @param {string} name - Proposed name
- * @returns {{isValid: boolean, error: string|null}}
- */
-export function validateReactionName(name) {
-  const trimmed = (name || '').trim();
-
-  if (trimmed.length > VALIDATION_LIMITS.REACTION_NAME_MAX_LENGTH) {
-    return {
-      isValid: false,
-      error: `Reaction Name cannot exceed ${VALIDATION_LIMITS.REACTION_NAME_MAX_LENGTH} characters`
     };
   }
 

@@ -12,7 +12,6 @@
 import { GameIdentityService } from './game-identity-service.js';
 import { persistenceService } from './persistence-service.js';
 import { VALIDATION_LIMITS, validateGameName } from '../shared/validation.js';
-import { INITIAL_MOCK_GAMES } from '../shared/mock-data.js';
 
 export class GameManagementService {
   constructor() {

@@ -15,19 +15,40 @@
 
   console.log('[Reactron] Content script and Overlay Engine initialized.');
 
+  let ViewportLayoutService = null;
+  if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.getURL === 'function') {
+    import(chrome.runtime.getURL('services/viewport-layout-service.js'))
+      .then((mod) => {
+        ViewportLayoutService = mod.ViewportLayoutService;
+      })
+      .catch((err) => {
+        console.warn('[Reactron] Failed to load ViewportLayoutService module:', err);
+      });
+  }
+
+  function resolveSurfaceBoundsSync() {
+    if (ViewportLayoutService) {
+      return ViewportLayoutService.resolveGameSurfaceBounds(document, window);
+    }
+    const vw = Math.max(window.innerWidth, 1);
+    const vh = Math.max(window.innerHeight, 1);
+    return {
+      left: 0,
+      top: 0,
+      width: vw,
+      height: vh,
+      viewportWidth: vw,
+      viewportHeight: vh,
+      hasDedicatedSurface: false
+    };
+  }
+
   // State
   const state = {
     isSelecting: false,
     targetRegionId: null,
     watchRegion: null,
-    baselineImageData: null,
-    isMonitoring: false,
-    monitorIntervalId: null,
-    samplingRateMs: 400,
-    thresholdPercent: 12,
-    cooldownMs: 3000,
-    lastTriggerTimestamp: 0,
-    lastDiffPercent: 0,
+    lastCapturedGeometry: null,
 
     // Reposition state
     repositionMode: false,
@@ -215,6 +236,7 @@
   // --- Watch Region Selection Logic ---
   function startRegionSelection() {
     if (state.isSelecting) return;
+    clearAllOverlays();
     state.isSelecting = true;
     hostDiv.style.pointerEvents = 'auto';
 
@@ -273,17 +295,25 @@
       if (width > 10 && height > 10) {
         state.watchRegion = { x: left, y: top, width, height };
 
-        const vw = Math.max(window.innerWidth, 1);
-        const vh = Math.max(window.innerHeight, 1);
-        const normalizedGeom = {
-          x: Number((left / vw).toFixed(4)),
-          y: Number((top / vh).toFixed(4)),
-          width: Number((width / vw).toFixed(4)),
-          height: Number((height / vh).toFixed(4)),
-          viewportWidth: vw,
-          viewportHeight: vh
-        };
+        const surfaceBounds = resolveSurfaceBoundsSync();
+        const vw = surfaceBounds.viewportWidth;
+        const vh = surfaceBounds.viewportHeight;
 
+        const normalizedGeom = ViewportLayoutService
+          ? ViewportLayoutService.normalizeRegionToSurface(
+              { x: left, y: top, width, height },
+              surfaceBounds
+            )
+          : {
+              x: Number((left / vw).toFixed(4)),
+              y: Number((top / vh).toFixed(4)),
+              width: Number((width / vw).toFixed(4)),
+              height: Number((height / vh).toFixed(4)),
+              viewportWidth: vw,
+              viewportHeight: vh
+            };
+
+        state.lastCapturedGeometry = normalizedGeom;
         const captureRegionId = state.targetRegionId || null;
 
         // Wait for two animation frames + brief paint settle so the selection overlay tint
@@ -378,6 +408,69 @@
   // ==========================================
 
   /**
+   * Projects position and proportional scale onto a rendered overlay container
+   */
+  function applyResponsiveLayoutToOverlay(containerEl) {
+    if (!containerEl || !containerEl._reactronMeta) return;
+    const meta = containerEl._reactronMeta;
+    const surfaceBounds = resolveSurfaceBoundsSync();
+
+    const projectedPos = ViewportLayoutService
+      ? ViewportLayoutService.projectPositionToViewport(
+          meta.position,
+          surfaceBounds,
+          meta.referenceGeometry,
+          meta.defaultRatio
+        )
+      : {
+          xRatio: meta.position?.xRatio !== undefined ? meta.position.xRatio : meta.defaultRatio.xRatio,
+          yRatio: meta.position?.yRatio !== undefined ? meta.position.yRatio : meta.defaultRatio.yRatio
+        };
+
+    const scaleFactor = ViewportLayoutService
+      ? ViewportLayoutService.computeScaleFactor(
+          meta.position,
+          surfaceBounds,
+          meta.referenceGeometry
+        )
+      : 1;
+
+    containerEl.style.left = `${projectedPos.xRatio * 100}%`;
+    containerEl.style.top = `${projectedPos.yRatio * 100}%`;
+
+    if (meta.type === 'gif' && meta.targetEl) {
+      const scaledWidth = Math.max(32, Math.round((meta.baseSize || 180) * scaleFactor));
+      meta.targetEl.style.width = `${scaledWidth}px`;
+    } else if (meta.type === 'text' && meta.targetEl) {
+      const scaledFont = Math.max(12, Math.round((meta.baseFontSize || 32) * scaleFactor));
+      meta.targetEl.style.fontSize = `${scaledFont}px`;
+    }
+
+    return projectedPos;
+  }
+
+  /**
+   * Dynamically updates all currently visible overlays when the browser window is resized
+   */
+  function syncActiveOverlaysWithViewport() {
+    const activeEls = uiContainer.querySelectorAll('.r-overlay-container');
+    activeEls.forEach((el) => {
+      if (el._reactronMeta) {
+        const updatedPos = applyResponsiveLayoutToOverlay(el);
+        if (el === repositionEl && updatedPos && state.repositionMode) {
+          state.repositionCurrentPos = {
+            ...state.repositionCurrentPos,
+            xRatio: updatedPos.xRatio,
+            yRatio: updatedPos.yRatio
+          };
+        }
+      }
+    });
+  }
+
+  window.addEventListener('resize', syncActiveOverlaysWithViewport);
+
+  /**
    * Cleans up all currently active overlays, timers, and reposition elements
    */
   function clearAllOverlays() {
@@ -396,8 +489,12 @@
    * Executes a Reaction Configuration overlay without clearing existing concurrent overlays
    * Supports multiple items (GIF + Text together or individually)
    */
-  function renderReactionExecution(config) {
+  function renderReactionExecution(config, metadata = {}) {
     if (!config) return;
+    const referenceGeometry = metadata?.regionGeometry || state.lastCapturedGeometry || null;
+    if (metadata?.regionGeometry) {
+      state.lastCapturedGeometry = metadata.regionGeometry;
+    }
 
     // 1. GIF / Image Reaction
     if (config.gifReaction?.enabled && (config.gifReaction.fileUrl || '').trim()) {
@@ -409,17 +506,21 @@
         const itemContainer = document.createElement('div');
         itemContainer.className = 'r-overlay-container anim-pop-in';
 
-        // Normalized Position (viewport percentage)
-        const posX = g.position?.xRatio !== undefined ? g.position.xRatio : 0.5;
-        const posY = g.position?.yRatio !== undefined ? g.position.yRatio : 0.35;
-        itemContainer.style.left = `${posX * 100}%`;
-        itemContainer.style.top = `${posY * 100}%`;
-
         const img = document.createElement('img');
         img.className = 'r-overlay-gif-img';
         img.src = g.fileUrl;
-        img.style.width = `${g.size || 180}px`;
         img.style.maxWidth = '90vw';
+
+        itemContainer._reactronMeta = {
+          type: 'gif',
+          baseSize: g.size || 180,
+          position: g.position,
+          referenceGeometry,
+          defaultRatio: { xRatio: 0.5, yRatio: 0.35 },
+          targetEl: img
+        };
+
+        applyResponsiveLayoutToOverlay(itemContainer);
 
         itemContainer.appendChild(img);
         uiContainer.appendChild(itemContainer);
@@ -447,18 +548,22 @@
         const fontClass = `font-${t.fontType || 'impact'}`;
         itemContainer.className = `r-overlay-container ${animClass}`;
 
-        // Normalized Position (viewport percentage)
-        const posX = t.position?.xRatio !== undefined ? t.position.xRatio : 0.5;
-        const posY = t.position?.yRatio !== undefined ? t.position.yRatio : 0.6;
-        itemContainer.style.left = `${posX * 100}%`;
-        itemContainer.style.top = `${posY * 100}%`;
-
         const textEl = document.createElement('div');
         textEl.className = `r-overlay-text ${fontClass}`;
         // Strict text sanitization: plain textContent only
         textEl.textContent = t.text.trim();
-        textEl.style.fontSize = `${t.fontSize || 32}px`;
         textEl.style.color = t.fontColor || '#F4F6FA';
+
+        itemContainer._reactronMeta = {
+          type: 'text',
+          baseFontSize: t.fontSize || 32,
+          position: t.position,
+          referenceGeometry,
+          defaultRatio: { xRatio: 0.5, yRatio: 0.6 },
+          targetEl: textEl
+        };
+
+        applyResponsiveLayoutToOverlay(itemContainer);
 
         itemContainer.appendChild(textEl);
         uiContainer.appendChild(itemContainer);
@@ -497,20 +602,38 @@
     state.repositionItemType = itemType;
     hostDiv.style.pointerEvents = 'auto';
 
-    // Initialize original position and current position
-    const initX = itemData.position?.xRatio !== undefined ? itemData.position.xRatio : 0.5;
-    const initY = itemData.position?.yRatio !== undefined
-      ? itemData.position.yRatio
-      : (itemType === 'gif' ? 0.35 : 0.6);
+    const defaultRatio = itemType === 'gif' ? { xRatio: 0.5, yRatio: 0.35 } : { xRatio: 0.5, yRatio: 0.6 };
+    const surfaceBounds = resolveSurfaceBoundsSync();
+    const referenceGeometry = state.lastCapturedGeometry || null;
 
-    state.repositionOriginalPos = { xRatio: initX, yRatio: initY };
-    state.repositionCurrentPos = { xRatio: initX, yRatio: initY };
+    const projectedInit = ViewportLayoutService
+      ? ViewportLayoutService.projectPositionToViewport(
+          itemData.position,
+          surfaceBounds,
+          referenceGeometry,
+          defaultRatio
+        )
+      : {
+          xRatio: itemData.position?.xRatio !== undefined ? itemData.position.xRatio : defaultRatio.xRatio,
+          yRatio: itemData.position?.yRatio !== undefined ? itemData.position.yRatio : defaultRatio.yRatio
+        };
+
+    const initialNormalized = ViewportLayoutService
+      ? ViewportLayoutService.normalizePositionToSurface(
+          projectedInit.xRatio * surfaceBounds.viewportWidth,
+          projectedInit.yRatio * surfaceBounds.viewportHeight,
+          surfaceBounds
+        )
+      : { xRatio: projectedInit.xRatio, yRatio: projectedInit.yRatio };
+
+    state.repositionOriginalPos = itemData.position
+      ? { ...itemData.position }
+      : { ...initialNormalized };
+    state.repositionCurrentPos = { ...initialNormalized };
 
     // Draggable Target Container
     repositionEl = document.createElement('div');
     repositionEl.className = 'r-overlay-container reposition-box';
-    repositionEl.style.left = `${initX * 100}%`;
-    repositionEl.style.top = `${initY * 100}%`;
 
     // 4 Corner Handles
     ['tl', 'tr', 'bl', 'br'].forEach((pos) => {
@@ -519,22 +642,34 @@
       repositionEl.appendChild(handle);
     });
 
+    let targetChildEl = null;
     if (itemType === 'gif') {
       const img = document.createElement('img');
       img.className = 'r-overlay-gif-img';
       img.src = itemData.fileUrl;
-      img.style.width = `${itemData.size || 180}px`;
       repositionEl.appendChild(img);
+      targetChildEl = img;
     } else {
       const textEl = document.createElement('div');
       const fontClass = `font-${itemData.fontType || 'impact'}`;
       textEl.className = `r-overlay-text ${fontClass}`;
       textEl.textContent = itemData.text.trim();
-      textEl.style.fontSize = `${itemData.fontSize || 32}px`;
       textEl.style.color = itemData.fontColor || '#F4F6FA';
       repositionEl.appendChild(textEl);
+      targetChildEl = textEl;
     }
 
+    repositionEl._reactronMeta = {
+      type: itemType,
+      baseSize: itemData.size || 180,
+      baseFontSize: itemData.fontSize || 32,
+      position: state.repositionCurrentPos,
+      referenceGeometry,
+      defaultRatio,
+      targetEl: targetChildEl
+    };
+
+    applyResponsiveLayoutToOverlay(repositionEl);
     uiContainer.appendChild(repositionEl);
 
     // Drag Listener (preserves pointer grab offset relative to element center)
@@ -556,22 +691,33 @@
 
     const onPointerMove = (e) => {
       if (!isDragging) return;
-      const vw = Math.max(window.innerWidth, 1);
-      const vh = Math.max(window.innerHeight, 1);
+      const liveSurface = resolveSurfaceBoundsSync();
+      const vw = liveSurface.viewportWidth;
+      const vh = liveSurface.viewportHeight;
 
       const targetCenterX = e.clientX - grabOffsetX;
       const targetCenterY = e.clientY - grabOffsetY;
 
-      // Clamp between 5% and 95% of content viewport
-      const clampedX = Math.max(vw * 0.05, Math.min(targetCenterX, vw * 0.95));
-      const clampedY = Math.max(vh * 0.05, Math.min(targetCenterY, vh * 0.95));
+      if (ViewportLayoutService) {
+        state.repositionCurrentPos = ViewportLayoutService.normalizePositionToSurface(
+          targetCenterX,
+          targetCenterY,
+          liveSurface
+        );
+      } else {
+        const clampedX = Math.max(vw * 0.05, Math.min(targetCenterX, vw * 0.95));
+        const clampedY = Math.max(vh * 0.05, Math.min(targetCenterY, vh * 0.95));
+        state.repositionCurrentPos = {
+          xRatio: Number((clampedX / vw).toFixed(4)),
+          yRatio: Number((clampedY / vh).toFixed(4))
+        };
+      }
 
-      const xRatio = Number((clampedX / vw).toFixed(4));
-      const yRatio = Number((clampedY / vh).toFixed(4));
-
-      state.repositionCurrentPos = { xRatio, yRatio };
-      repositionEl.style.left = `${xRatio * 100}%`;
-      repositionEl.style.top = `${yRatio * 100}%`;
+      if (repositionEl._reactronMeta) {
+        repositionEl._reactronMeta.position = state.repositionCurrentPos;
+      }
+      repositionEl.style.left = `${state.repositionCurrentPos.xRatio * 100}%`;
+      repositionEl.style.top = `${state.repositionCurrentPos.yRatio * 100}%`;
     };
 
     const onPointerUp = () => {
@@ -609,6 +755,14 @@
 
   // --- Message Dispatcher for Popup & Detection Service ---
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'GET_LIVE_SURFACE_BOUNDS') {
+      sendResponse({
+        success: true,
+        bounds: resolveSurfaceBoundsSync()
+      });
+      return true;
+    }
+
     if (request.action === 'RENDER_OVERLAY_PREVIEW') {
       renderReactionPreview(request.config);
       sendResponse({ success: true });
@@ -616,7 +770,9 @@
     }
 
     if (request.action === 'RENDER_OVERLAY_REACTION') {
-      renderReactionExecution(request.config);
+      if (!state.isSelecting) {
+        renderReactionExecution(request.config, request.metadata || {});
+      }
       sendResponse({ success: true });
       return true;
     }
@@ -645,18 +801,11 @@
       return true;
     }
 
-    if (request.action === 'TRIGGER_SELECTION' || request.action === 'START_REGION_SELECTION') {
+    if (request.action === 'START_REGION_SELECTION') {
       state.targetRegionId = request.regionId || null;
       startRegionSelection();
       sendResponse({ success: true });
       return true;
-    }
-  });
-
-  // Support in-page test triggers from test-game.html
-  window.addEventListener('message', (event) => {
-    if (event.data && event.data.action === 'REACTRON_SIMULATE_REACTION' && event.data.config) {
-      renderReactionPreview(event.data.config);
     }
   });
 

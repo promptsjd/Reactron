@@ -15,8 +15,8 @@
  */
 
 import { SCHEMA_VERSION, STORAGE_KEYS, MIGRATIONS, SchemaValidator } from '../shared/schema.js';
+import { WATCH_REGION_CONSTANTS, REACTION_CONFIG_CONSTANTS } from '../shared/types.js';
 import { mediaStorage } from './media-storage.js';
-import { INITIAL_MOCK_GAMES, MOCK_LIBRARY_GIFS, MOCK_LIBRARY_TEXTS } from '../shared/mock-data.js';
 
 export class PersistenceService {
   constructor() {
@@ -97,18 +97,12 @@ export class PersistenceService {
   }
 
   /**
-   * Seeds initial sample dataset on first launch
+   * Seeds initial empty collections on first launch
    * @private
    */
   async _seedInitialData() {
-    const games = JSON.parse(JSON.stringify(INITIAL_MOCK_GAMES));
-    const presets = [
-      ...MOCK_LIBRARY_GIFS.map((g) => ({ ...g, id: `lib_${g.id}`, createdAt: Date.now() })),
-      ...MOCK_LIBRARY_TEXTS.map((t) => ({ ...t, id: `lib_${t.id}`, createdAt: Date.now() }))
-    ];
-
-    await this._writeKey(STORAGE_KEYS.GAMES, games);
-    await this._writeKey(STORAGE_KEYS.LIBRARY_PRESETS, presets);
+    await this._writeKey(STORAGE_KEYS.GAMES, []);
+    await this._writeKey(STORAGE_KEYS.LIBRARY_PRESETS, []);
     await this._writeKey(STORAGE_KEYS.SCHEMA_VERSION, SCHEMA_VERSION);
   }
 
@@ -147,16 +141,6 @@ export class PersistenceService {
   }
 
   /**
-   * Retrieves a specific game by ID
-   * @param {string} id
-   * @returns {Promise<import('../shared/types.js').GameEntry|null>}
-   */
-  async getGameById(id) {
-    const games = await this.getGames();
-    return games.find((g) => g.id === id) || null;
-  }
-
-  /**
    * Saves or updates a Game entity
    * Validates name uniqueness and length at boundary.
    * @param {import('../shared/types.js').GameEntry} game
@@ -184,7 +168,8 @@ export class PersistenceService {
     // Process Watch Regions and Reaction Configurations
     const processedRegions = [];
     if (Array.isArray(game.watchRegions)) {
-      for (const region of game.watchRegions) {
+      const limitedRegions = game.watchRegions.slice(0, WATCH_REGION_CONSTANTS.MAX_REGIONS_PER_GAME);
+      for (const region of limitedRegions) {
         region.gameId = game.id;
         const regVal = SchemaValidator.validateRegion(region, game.id);
         if (!regVal.isValid) {
@@ -193,7 +178,10 @@ export class PersistenceService {
 
         const processedConfigs = [];
         if (Array.isArray(region.reactionConfigs)) {
-          const limitedConfigs = region.reactionConfigs.slice(0, 2);
+          const limitedConfigs = region.reactionConfigs.slice(
+            0,
+            REACTION_CONFIG_CONSTANTS.MAX_REACTIONS_PER_REGION
+          );
           for (let configIndex = 0; configIndex < limitedConfigs.length; configIndex++) {
             const config = limitedConfigs[configIndex];
             config.regionId = region.id;
@@ -202,7 +190,7 @@ export class PersistenceService {
               return { success: false, error: cfgVal.error };
             }
 
-            const defaultLabel = `Reaction ${configIndex + 1}`;
+            const defaultLabel = `${REACTION_CONFIG_CONSTANTS.LABEL_PREFIX} ${configIndex + 1}`;
             const resolvedType =
               config.type ||
               (config.gifReaction?.enabled ? 'gif' : config.textReaction?.enabled ? 'text' : null);
@@ -343,7 +331,20 @@ export class PersistenceService {
   }
 
   /**
-   * Deletes a game and cleans up orphaned media references safely
+   * Clears any temporary captured region preview data from storage
+   * @returns {Promise<void>}
+   */
+  async clearCapturedRegionCache() {
+    this._memoryStore.delete(STORAGE_KEYS.LAST_CAPTURED_REGION);
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      await new Promise((resolve) => {
+        chrome.storage.local.remove([STORAGE_KEYS.LAST_CAPTURED_REGION], () => resolve());
+      });
+    }
+  }
+
+  /**
+   * Deletes a game and cleans up orphaned media references and temporary region capture cache safely
    * @param {string} gameId
    * @returns {Promise<boolean>}
    */
@@ -352,160 +353,10 @@ export class PersistenceService {
     const games = await this.getGames();
     const filtered = games.filter((g) => g.id !== gameId);
     await this._writeKey(STORAGE_KEYS.GAMES, filtered);
+    await this.clearCapturedRegionCache();
     // Trigger media GC
     await this.cleanupOrphanedMedia();
     return true;
-  }
-
-  // ==========================================
-  // REACTION CONFIGURATION OPERATIONS
-  // ==========================================
-
-  /**
-   * Saves a reaction configuration inside its parent region and game.
-   * @param {string} gameId
-   * @param {string} regionId
-   * @param {import('../shared/types.js').ReactionConfig} config
-   * @returns {Promise<{success: boolean, error?: string}>}
-   */
-  async saveReactionConfiguration(gameId, regionId, config) {
-    await this.initialize();
-
-    const games = await this.getGames();
-    const game = games.find((g) => g.id === gameId);
-    if (!game) {
-      return { success: false, error: `Parent Game ${gameId} not found` };
-    }
-
-    const region = game.watchRegions?.find((r) => r.id === regionId);
-    if (!region) {
-      return { success: false, error: `Parent Watch Region ${regionId} not found` };
-    }
-
-    if (!region.reactionConfigs) {
-      region.reactionConfigs = [];
-    }
-
-    const existingIndex = region.reactionConfigs.findIndex((c) => c.id === config.id);
-    const slotNumber = existingIndex >= 0 ? existingIndex + 1 : region.reactionConfigs.length + 1;
-    const defaultLabel = `Reaction ${slotNumber}`;
-    const resolvedType =
-      config.type ||
-      (config.gifReaction?.enabled ? 'gif' : config.textReaction?.enabled ? 'text' : null);
-
-    // 1. Process GIF reaction media persistence
-    const savedConfig = {
-      id: config.id,
-      regionId: region.id,
-      type: resolvedType,
-      customTitle: config.customTitle || '',
-      updatedAt: Date.now()
-    };
-
-    // Handle GIF/Image Reaction (preserve only if present/enabled, never invent)
-    if (config.gifReaction) {
-      const g = config.gifReaction;
-      let mediaAssetId = g.mediaAssetId || null;
-
-      const isSmallBuiltInSvg =
-        typeof g.fileUrl === 'string' &&
-        g.fileUrl.startsWith('data:image/svg+xml') &&
-        g.fileUrl.length < 2048;
-
-      // If user uploaded a new dataUrl, persist in IndexedDB media store
-      if (g.fileUrl && g.fileUrl.startsWith('data:') && !isSmallBuiltInSvg) {
-        try {
-          mediaAssetId = await mediaStorage.storeMedia(g.fileUrl, {
-            fileName: g.fileName || 'reaction.gif',
-            mimeType: g.mimeType || 'image/gif'
-          });
-        } catch (err) {
-          console.warn('[PersistenceService] Could not store binary media in IndexedDB:', err);
-        }
-      }
-
-      const persistedFileUrl =
-        mediaAssetId && !isSmallBuiltInSvg ? '' : (g.fileUrl || '');
-
-      const reactionLabel = (g.name || '').trim() || defaultLabel;
-
-      savedConfig.gifReaction = {
-        enabled: !!g.enabled,
-        name: reactionLabel,
-        mediaAssetId,
-        fileUrl: persistedFileUrl,
-        fileName: g.fileName || '',
-        size: g.size || 180,
-        delaySeconds: g.delaySeconds || 0,
-        durationSeconds: g.durationSeconds || 3,
-        saveToLibrary: !!g.saveToLibrary,
-        position: g.position || { xRatio: 0.5, yRatio: 0.35 }
-      };
-
-      // Save to library preset if requested
-      if (g.saveToLibrary && g.enabled) {
-        const presetId = g.libraryPresetId || `lib_preset_${config.id}_gif`;
-        savedConfig.gifReaction.libraryPresetId = presetId;
-        await this.saveLibraryPreset({
-          id: presetId,
-          type: 'gif',
-          name: reactionLabel.slice(0, 15),
-          summary: `GIF Overlay (${g.size || 180}px)`,
-          mediaAssetId,
-          content: { ...savedConfig.gifReaction, saveToLibrary: false }
-        });
-      }
-    }
-
-    // Handle Text Reaction (preserve only if present/enabled, never invent)
-    if (config.textReaction) {
-      const t = config.textReaction;
-      const reactionLabel = (t.name || '').trim() || defaultLabel;
-
-      savedConfig.textReaction = {
-        enabled: !!t.enabled,
-        name: reactionLabel,
-        text: (t.text || '').trim(),
-        fontSize: t.fontSize || 32,
-        fontColor: t.fontColor || '#F4F6FA',
-        fontType: t.fontType || 'impact',
-        animationStyle: t.animationStyle || 'pop-in',
-        delaySeconds: t.delaySeconds || 0,
-        durationSeconds: t.durationSeconds || 3,
-        saveToLibrary: !!t.saveToLibrary,
-        position: t.position || { xRatio: 0.5, yRatio: 0.6 }
-      };
-
-      // Save to library preset if requested
-      if (t.saveToLibrary && t.enabled) {
-        const presetId = t.libraryPresetId || `lib_preset_${config.id}_text`;
-        savedConfig.textReaction.libraryPresetId = presetId;
-        await this.saveLibraryPreset({
-          id: presetId,
-          type: 'text',
-          name: reactionLabel.slice(0, 15),
-          summary: `"${t.text || ''}" • ${t.fontType || 'impact'}`,
-          content: { ...savedConfig.textReaction, saveToLibrary: false }
-        });
-      }
-    }
-
-    // Update inside parent region
-    if (existingIndex >= 0) {
-      region.reactionConfigs[existingIndex] = savedConfig;
-    } else {
-      region.reactionConfigs.push(savedConfig);
-    }
-
-    game.updatedAt = Date.now();
-
-    try {
-      await this._writeKey(STORAGE_KEYS.GAMES, games);
-      return { success: true };
-    } catch (err) {
-      console.error('[PersistenceService] Write failure:', err);
-      return { success: false, error: err.message };
-    }
   }
 
   // ==========================================
@@ -581,7 +432,8 @@ export class PersistenceService {
   }
 
   /**
-   * Deletes a library preset by ID and cleans up orphaned media references safely
+   * Deletes a library preset by ID, unlinks any saved game reaction referencing it,
+   * and cleans up orphaned media references safely
    * @param {string} presetId
    * @returns {Promise<boolean>}
    */
@@ -590,6 +442,30 @@ export class PersistenceService {
     const presets = await this.getLibraryPresets();
     const filtered = presets.filter((p) => p.id !== presetId);
     await this._writeKey(STORAGE_KEYS.LIBRARY_PRESETS, filtered);
+
+    // Unlink any saved game reaction referencing this deleted library preset so future saves do not recreate it
+    const games = await this.getGames();
+    let gamesModified = false;
+    games.forEach((g) => {
+      g.watchRegions?.forEach((r) => {
+        r.reactionConfigs?.forEach((c) => {
+          if (c.gifReaction?.libraryPresetId === presetId || `lib_preset_${c.id}_gif` === presetId) {
+            c.gifReaction.saveToLibrary = false;
+            c.gifReaction.libraryPresetId = null;
+            gamesModified = true;
+          }
+          if (c.textReaction?.libraryPresetId === presetId || `lib_preset_${c.id}_text` === presetId) {
+            c.textReaction.saveToLibrary = false;
+            c.textReaction.libraryPresetId = null;
+            gamesModified = true;
+          }
+        });
+      });
+    });
+    if (gamesModified) {
+      await this._writeKey(STORAGE_KEYS.GAMES, games);
+    }
+
     await this.cleanupOrphanedMedia();
     return true;
   }
@@ -629,32 +505,6 @@ export class PersistenceService {
     } catch (err) {
       console.warn('[PersistenceService] Orphaned media GC failed safely:', err);
       return 0;
-    }
-  }
-
-  /**
-   * Basic Schema Migration Test Demonstration
-   * Verifies that stored data evolves safely across version upgrades.
-   * @returns {Promise<{passed: boolean, details: string}>}
-   */
-  async testSchemaMigration() {
-    try {
-      const testData = {
-        games: [{ id: 'test_g1', name: 'Legacy Game', url: 'https://test.com' }],
-        libraryPresets: []
-      };
-
-      // Run migration v1 on test payload
-      const migrationV1 = MIGRATIONS.find((m) => m.version === 1);
-      const migrated = migrationV1.up(testData);
-
-      const isValid = Array.isArray(migrated.games) && Array.isArray(migrated.regions) && Array.isArray(migrated.configs);
-      return {
-        passed: isValid,
-        details: isValid ? 'Migration v1 correctly normalized relational collections.' : 'Migration failed to produce required schema shape.'
-      };
-    } catch (err) {
-      return { passed: false, details: `Migration test threw: ${err.message}` };
     }
   }
 }
