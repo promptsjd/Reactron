@@ -35,7 +35,11 @@ export function renderDashboard({
 
   const logoIcon = document.createElement('span');
   logoIcon.className = 'r-brand-logo';
-  logoIcon.textContent = '⚡';
+  const logoImg = document.createElement('img');
+  logoImg.src = '../icons/logo.png';
+  logoImg.alt = 'Reactron Logo';
+  logoImg.className = 'r-brand-logo-img';
+  logoIcon.appendChild(logoImg);
 
   const titleEl = document.createElement('h1');
   titleEl.className = 'r-brand-title';

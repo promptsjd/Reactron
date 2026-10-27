@@ -111,7 +111,6 @@ export class PersistenceService {
    * @private
    */
   async _executeMigrations(fromVersion, targetVersion) {
-    console.log(`[PersistenceService] Migrating schema from v${fromVersion} to v${targetVersion}...`);
     for (const m of MIGRATIONS) {
       if (m.version > fromVersion && m.version <= targetVersion) {
         const games = await this.getGames();
@@ -123,7 +122,6 @@ export class PersistenceService {
       }
     }
     await this._writeKey(STORAGE_KEYS.SCHEMA_VERSION, targetVersion);
-    console.log(`[PersistenceService] Schema successfully migrated to v${targetVersion}`);
   }
 
   // ==========================================

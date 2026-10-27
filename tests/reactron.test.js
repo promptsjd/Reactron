@@ -14,7 +14,7 @@ import { RegionManagementService } from '../extension/services/region-management
 import { mediaStorage } from '../extension/services/media-storage.js';
 import { STORAGE_KEYS } from '../extension/shared/schema.js';
 
-describe('Stage 5: StrictnessMapper (Visual Fingerprinting Sensitivity)', () => {
+describe('StrictnessMapper (Visual Fingerprinting Sensitivity)', () => {
   test('clamps values outside bounds to [1, 100]', () => {
     assert.equal(StrictnessMapper.clamp(0), STRICTNESS_BOUNDS.MIN_SLIDER);
     assert.equal(StrictnessMapper.clamp(-50), STRICTNESS_BOUNDS.MIN_SLIDER);
@@ -49,7 +49,7 @@ describe('Stage 5: StrictnessMapper (Visual Fingerprinting Sensitivity)', () => 
   });
 });
 
-describe('Stage 5: FingerprintDetectionAdapter (Visual Fingerprinting)', () => {
+describe('FingerprintDetectionAdapter (Visual Fingerprinting)', () => {
   const adapter = new VisualDiffDetectionAdapter();
 
   test('identical pixel buffers yield 100% similarity and trigger successfully', () => {
@@ -115,7 +115,7 @@ describe('Stage 5: FingerprintDetectionAdapter (Visual Fingerprinting)', () => {
   });
 });
 
-describe('Stage 5: TriggerDebouncer & Cooldown Manager', () => {
+describe('TriggerDebouncer & Cooldown Manager', () => {
   test('single event triggers once and transitions to TRIGGERED state', () => {
     const debouncer = new TriggerDebouncer({ cooldownMs: 3000 });
     const t0 = 1000;
@@ -131,7 +131,7 @@ describe('Stage 5: TriggerDebouncer & Cooldown Manager', () => {
   });
 });
 
-describe('Stage 5: Browser Integration & Failure Handling', () => {
+describe('Browser Integration & Failure Handling', () => {
   test('identifies unsupported internal browser pages accurately', () => {
     const chromeInternal = GameIdentityService.validateTabEligibility('chrome://settings');
     const validHttp = GameIdentityService.validateTabEligibility('https://poki.com/en/g/astro-blaster');
@@ -159,7 +159,7 @@ describe('Stage 5: Browser Integration & Failure Handling', () => {
   });
 });
 
-describe('Phase 6: PersistenceService, GameManagementService & DetectionService Integration', () => {
+describe('PersistenceService, GameManagementService & DetectionService Integration', () => {
   test('STORAGE_KEYS excludes unused REGIONS and CONFIGS keys', () => {
     assert.equal(STORAGE_KEYS.REGIONS, undefined);
     assert.equal(STORAGE_KEYS.CONFIGS, undefined);
@@ -370,7 +370,7 @@ describe('Phase 6: PersistenceService, GameManagementService & DetectionService 
   });
 });
 
-describe('Phase 7: ViewportLayoutService (Modular Browser Resize Adaptation)', () => {
+describe('ViewportLayoutService (Modular Browser Resize Adaptation)', () => {
   test('normalizes Watch Region relative to game surface and projects accurately when browser is resized', () => {
     // 1. Capture region while maximized (1920x1080) with a game canvas at (160, 40, 1600x900)
     const maximizedSurface = {

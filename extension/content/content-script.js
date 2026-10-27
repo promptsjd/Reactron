@@ -13,8 +13,6 @@
   if (window.__REACTRON_INITIALIZED__) return;
   window.__REACTRON_INITIALIZED__ = true;
 
-  console.log('[Reactron] Content script and Overlay Engine initialized.');
-
   let ViewportLayoutService = null;
   if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.getURL === 'function') {
     import(chrome.runtime.getURL('services/viewport-layout-service.js'))

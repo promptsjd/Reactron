@@ -285,7 +285,6 @@ export class DetectionService {
     }, this.samplingRateMs);
 
     this._sessions.set(sessionKey, session);
-    console.log(`[DetectionService] Started monitoring session: ${sessionKey} (${game.name} on tab ${tabId})`);
     this._notifyStatusChange();
   }
 
@@ -312,7 +311,6 @@ export class DetectionService {
     }
 
     this._sessions.delete(sessionKey);
-    console.log(`[DetectionService] Stopped session: ${sessionKey} (${reason})`);
     this._notifyStatusChange();
   }
 
@@ -424,7 +422,6 @@ export class DetectionService {
         const evalResult = debouncer.evaluate(compResult.delta, threshold, Date.now());
 
         if (evalResult.shouldTrigger) {
-          console.log(`[DetectionService] 🎯 Trigger fired for region "${region.name || region.id}"! Delta: ${compResult.delta}% >= Threshold: ${threshold}%`);
           session.triggerCount++;
           session.lastTriggerTimestamp = Date.now();
           this._notifyStatusChange();

@@ -1,7 +1,9 @@
 {
-  "name": "react-example",
-  "private": true,
-  "version": "0.0.0",
+  "name": "reactron",
+  "private": false,
+  "version": "1.0.0",
+  "description": "Configurable text and GIF/image reaction overlays for browser-based games, triggered automatically by HUD visual changes.",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",

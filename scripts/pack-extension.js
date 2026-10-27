@@ -15,6 +15,7 @@ async function packExtension() {
   function addDirectoryToZip(dirPath, zipFolder) {
     const items = fs.readdirSync(dirPath);
     for (const item of items) {
+      if (item === '.DS_Store' || item === 'Thumbs.db') continue;
       const fullPath = path.join(dirPath, item);
       const stat = fs.statSync(fullPath);
       if (stat.isDirectory()) {
@@ -27,7 +28,7 @@ async function packExtension() {
     }
   }
 
-  console.log('Adding extension files to ZIP...');
+  console.log('Adding extension v1.0.0 production files to ZIP...');
   addDirectoryToZip(extensionDir, zip);
 
   const zipBuffer = await zip.generateAsync({
@@ -37,8 +38,15 @@ async function packExtension() {
   });
 
   const zipPathPrimary = path.join(publicDir, 'reactron-extension.zip');
-
   fs.writeFileSync(zipPathPrimary, zipBuffer);
+
+  // Also copy icon128.png to public/ so it can be downloaded directly from the Store Assets portal
+  const icon128Src = path.join(extensionDir, 'icons', 'icon128.png');
+  const icon128Dest = path.join(publicDir, 'icon128.png');
+  if (fs.existsSync(icon128Src)) {
+    fs.copyFileSync(icon128Src, icon128Dest);
+  }
+
   console.log(`Successfully created: ${zipPathPrimary} (${(zipBuffer.length / 1024).toFixed(2)} KB)`);
 }
 

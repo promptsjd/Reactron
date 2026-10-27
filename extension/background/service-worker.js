@@ -63,7 +63,6 @@ function configureSidePanelBehavior() {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[Reactron] Background service worker initialized.');
   configureSidePanelBehavior();
   syncBackgroundDetection();
 });

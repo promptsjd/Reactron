@@ -319,7 +319,7 @@ function startApp() {
     if (root && root.children.length === 0) {
       root.innerHTML = `
         <div style="padding: 24px 16px; color: #F4F6FA; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center;">
-          <div style="font-size: 28px; margin-bottom: 8px;">⚡</div>
+          <img src="../icons/logo.png" alt="Reactron" style="width: 32px; height: 32px; object-fit: contain; margin: 0 auto 8px; display: block;" />
           <h2 style="font-size: 15px; font-weight: 700; margin-bottom: 6px;">Reactron</h2>
           <p style="font-size: 12px; color: #A9B3C4; margin-bottom: 16px;">Failed to initialize side panel: ${err?.message || 'Unknown error'}</p>
           <button onclick="window.location.reload()" style="background: #607DFA; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;">Reload Panel</button>
